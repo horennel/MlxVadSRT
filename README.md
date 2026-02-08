@@ -97,7 +97,7 @@ pip install torch numpy mlx-whisper
 
 - `--audio`: 输入音频文件路径。与 `--video` **互斥**，只能指定其中一个。
 - `--video`: 输入视频文件路径。与 `--audio` **互斥**，只能指定其中一个。
-- `--lang`: 指定语言 (默认: `zh`, 可选: `zh, en, ja, ko, auto`)。
+- `--lang`: 指定语言 (默认: `auto` 自动检测, 可选: `zh, en, ja, ko, auto`)。
 - `--model`: MLX 模型路径或 HF 仓库 (默认: `mlx-community/whisper-large-v3-mlx`)。**注意**：仅支持 `mlx-community/whisper` 系列模型。
 - `--output`: 输出 SRT 文件名 (默认: `output.srt`)。
 - `--sample_rate`: 采样率 (默认: `16000`)。
@@ -131,4 +131,4 @@ mlxvad --audio interview.wav --lang auto
 
 ## 常见问题
 - **首次运行**: 程序会自动从 Hugging Face 下载模型，请保持网络畅通。
-- **离线使用**: 设置 `os.environ["HF_HUB_OFFLINE"] = "1"`（已在脚本中默认开启）以强制使用本地缓存。
+- **离线使用**: 在脚本中取消 `os.environ["HF_HUB_OFFLINE"] = "1"` 的注释，可强制使用本地缓存。
