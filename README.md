@@ -3,7 +3,7 @@
 > [!CAUTION]
 > **警告**：本项目仅支持 **macOS (Apple Silicon)** 环境（如 M1, M2, M3 芯片）。`mlx-whisper` 依赖 Apple 芯片的硬件加速，无法在 Intel Mac、Windows 或 Linux 上运行。
 
-`MlxVadSRT` (原 `transcribe.py`) 是一个基于 MLX Whisper 和 Silero VAD 的高性能语音转文字工具，专为 macOS (Apple Silicon) 优化。它支持自动提取视频音频、人声检测（VAD）以及生成标准 SRT 字幕文件。
+`MlxVadSRT` 是一个基于 MLX Whisper 和 Silero VAD 的高性能语音转文字工具，专为 macOS (Apple Silicon) 优化。它支持自动提取视频音频、人声检测（VAD）以及生成标准 SRT 字幕文件。
 
 ## 1. 环境准备
 
@@ -36,7 +36,7 @@ pip install torch numpy mlx-whisper
 
 ### 方式一：Alias (别名部署) - （推荐）
 
-通过在终端配置文件中设置别名，直接调用 Python 脚本。适合经常需要修改脚本或在固定机器上使用的场景。
+通过在终端配置文件中设置别名，直接调用 Python 脚本。适合需要修改脚本或在固定机器上使用的场景。
 
 1.  **修改终端配置**（以 `zsh` 为例）：
     ```bash
@@ -46,8 +46,6 @@ pip install torch numpy mlx-whisper
 2.  **添加别名**（请根据实际路径替换）：
     ```bash
     # 假设项目在 ~/opt 目录下
-    alias transcribe='~/opt/venv/bin/python3 ~/opt/transcribe.py'
-    # 或者如果您想使用新名字作为命令：
     alias mlxvad='~/opt/venv/bin/python3 ~/opt/transcribe.py'
     ```
 
@@ -59,6 +57,9 @@ pip install torch numpy mlx-whisper
 ### 方式二：PyInstaller
 
 将脚本及其依赖打包成一个独立的二进制文件。
+
+> [!NOTE]
+> **注意**：由于需要包含 `torch` 和 `mlx` 等大型深度学习库，生成的二进制文件体积会比较大（通常在 1GB 以上）。打包过程也会占用较多内存和时间。
 
 1.  **安装打包工具**：
     ```bash
@@ -85,19 +86,44 @@ pip install torch numpy mlx-whisper
 
 | 场景 | 命令 |
 | :--- | :--- |
-| **转录视频 (中文)** | `transcribe --video demo.mp4 --lang zh` |
-| **转录音频 (自动检测语言)** | `transcribe --audio record.mp3 --lang auto` |
-| **指定输出文件名** | `transcribe --audio test.wav --output result.srt` |
-| **使用更小的模型 (加速)** | `transcribe --audio test.wav --model mlx-community/whisper-tiny-mlx` |
+| **转录视频 (中文)** | `mlxvad --video demo.mp4 --lang zh` |
+| **转录音频 (自动检测语言)** | `mlxvad --audio record.mp3 --lang auto` |
+| **指定输出文件名** | `mlxvad --audio test.wav --output result.srt` |
+| **使用更小的模型 (加速)** | `mlxvad --audio test.wav --model mlx-community/whisper-tiny-mlx` |
 
 ## 5. 参数说明
 
-- `--audio`: 输入音频文件路径。
-- `--video`: 输入视频文件路径。
+- `--audio`: 输入音频文件路径。与 `--video` **互斥**，只能指定其中一个。
+- `--video`: 输入视频文件路径。与 `--audio` **互斥**，只能指定其中一个。
 - `--lang`: 指定语言 (默认: `zh`, 可选: `zh, en, ja, ko, auto`)。
-- `--model`: MLX 模型路径或 HF 仓库 (默认: `mlx-community/whisper-large-v3-mlx`)。
+- `--model`: MLX 模型路径或 HF 仓库 (默认: `mlx-community/whisper-large-v3-mlx`)。**注意**：仅支持 `mlx-community/whisper` 系列模型。
 - `--output`: 输出 SRT 文件名 (默认: `output.srt`)。
 - `--sample_rate`: 采样率 (默认: `16000`)。
+
+---
+
+## 6. 使用示例
+
+### 场景：转录一个 Youtube 视频（已下载到本地）
+假设你下载了一个名为 `lecture.mp4` 的教程视频，想生成中文字幕：
+
+```bash
+mlxvad --video lecture.mp4 --lang zh --output lecture.srt
+```
+
+### 场景：快速转录（使用更小的模型）
+如果你对精度要求不高，但追求速度，可以使用 `tiny` 模型：
+
+```bash
+mlxvad --audio meeting_record.m4a --model mlx-community/whisper-tiny-mlx --output fast_result.srt
+```
+
+### 场景：自动检测语言
+如果你不确定音频中的语言：
+
+```bash
+mlxvad --audio interview.wav --lang auto
+```
 
 ---
 
