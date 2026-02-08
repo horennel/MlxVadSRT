@@ -1,14 +1,14 @@
 import os
 
-# 禁用 Hugging Face 联网检查，强制使用本地缓存
-os.environ["HF_HUB_OFFLINE"] = "1"
-# 如果本地没有模型，可以取消下面这行的注释来使用国内镜像站下载
+# 如果本地没有模型，首次运行时会自动从 Hugging Face 下载
+# 可以使用国内镜像站加速下载
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+# 如果已有本地缓存，可取消下面这行的注释来强制离线使用
+# os.environ["HF_HUB_OFFLINE"] = "1"
 
 import torch
 import numpy as np
 import mlx_whisper
-from datetime import timedelta
 import sys
 import subprocess
 import argparse
@@ -92,12 +92,11 @@ def load_audio_with_ffmpeg(file_path, sr=16000):
 
 def format_timestamp(seconds: float):
     """将秒数转换为 SRT 时间戳格式 (00:00:00,000)"""
-    td = timedelta(seconds=seconds)
-    total_seconds = int(td.total_seconds())
+    total_seconds = int(seconds)
+    millis = int((seconds - total_seconds) * 1000)
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
     secs = total_seconds % 60
-    millis = int(td.microseconds / 1000)
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 def transcribe_with_vad(args):
@@ -187,7 +186,7 @@ def transcribe_with_vad(args):
             os.remove(temp_audio_file)
         return
 
-    print(f"检测到 {len(speech_timestamps)} 段人声区域，开始转录 (语言: {args.lang or '自动检测'})...")
+    print(f"检测到 {len(speech_timestamps)} 段人声区域，开始转录 (语言: {'自动检测' if args.lang == 'auto' else args.lang})...")
 
     srt_entries = []
     counter = 1
@@ -222,7 +221,7 @@ def transcribe_with_vad(args):
                 s_start = start_sec + chunk_segment['start']
                 s_end = start_sec + chunk_segment['end']
 
-                entry = f"{counter}\n{format_timestamp(s_start)} --> {format_timestamp(s_end)}\n{text}\n"
+                entry = f"{counter}\n{format_timestamp(s_start)} --> {format_timestamp(s_end)}\n{text}"
                 srt_entries.append(entry)
                 counter += 1
 
@@ -238,9 +237,13 @@ def transcribe_with_vad(args):
             print("临时文件已清理")
 
     # 6. 保存结果
+    if not srt_entries:
+        print("\n未生成任何字幕内容。")
+        return
+
     output_path = os.path.abspath(args.output)
     with open(output_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(srt_entries))
+        f.write("\n\n".join(srt_entries) + "\n")
 
     print(f"\n完成！字幕已保存至: {output_path}")
 
@@ -249,7 +252,7 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--audio", type=str, help="输入音频文件路径")
     group.add_argument("--video", type=str, help="输入视频文件路径")
-    parser.add_argument("--lang", type=str, default="zh", choices=["zh", "en", "ja", "ko", "auto"], help="指定语言 (默认: zh)")
+    parser.add_argument("--lang", type=str, default="auto", choices=["zh", "en", "ja", "ko", "auto"], help="指定语言 (默认: auto 自动检测)")
     parser.add_argument("--model", type=str, default="mlx-community/whisper-large-v3-mlx", help="MLX 模型路径或 HF 仓库")
     parser.add_argument("--output", type=str, default="output.srt", help="输出 SRT 文件名")
     parser.add_argument("--sample_rate", type=int, default=16000, help="采样率")
