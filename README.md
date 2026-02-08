@@ -1,5 +1,7 @@
 # MlxVadSRT - 高性能语音转文字工具
 
+[English Documentation](README_en.md)
+
 > [!CAUTION]
 > **警告**：本项目仅支持 **macOS (Apple Silicon)** 环境（如 M1, M2, M3 芯片）。`mlx-whisper` 依赖 Apple 芯片的硬件加速，无法在 Intel Mac、Windows 或 Linux 上运行。
 
@@ -14,6 +16,7 @@
     ```bash
     brew install ffmpeg
     ```
+3.  **Apple Silicon (M1/M2/M3)**: `mlx-whisper` 需要 Apple 芯片支持。
 
 ## 2. 基础环境安装
 
@@ -35,7 +38,7 @@ pip install torch numpy mlx-whisper
 
 ### 方式一：Alias (别名部署) - （推荐）
 
-通过在终端配置文件中设置别名，直接调用 Python 脚本。适合需要修改脚本或在固定机器上使用的场景。
+通过在终端配置文件中设置别名，直接调用 Python 脚本。适合经常需要修改脚本或在固定机器上使用的场景。
 
 1.  **修改终端配置**（以 `zsh` 为例）：
     ```bash
