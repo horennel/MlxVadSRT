@@ -97,7 +97,7 @@ Package the script and its dependencies into a standalone binary file.
 
 - `--audio`: Input audio file path. **Mutually exclusive** with `--video`, only one can be specified.
 - `--video`: Input video file path. **Mutually exclusive** with `--audio`, only one can be specified.
-- `--lang`: Specify language (default: `zh`, options: `zh, en, ja, ko, auto`).
+- `--lang`: Specify language (default: `auto` for auto-detection, options: `zh, en, ja, ko, auto`).
 - `--model`: MLX model path or HF repository (default: `mlx-community/whisper-large-v3-mlx`). **Note**: Only supports `mlx-community/whisper` series models.
 - `--output`: Output SRT filename (default: `output.srt`).
 - `--sample_rate`: Sample rate (default: `16000`).
@@ -131,4 +131,4 @@ mlxvad --audio interview.wav --lang auto
 
 ## FAQ
 - **First run**: The program will automatically download models from Hugging Face, please ensure network connectivity.
-- **Offline usage**: Set `os.environ["HF_HUB_OFFLINE"] = "1"` (already enabled by default in the script) to force using local cache.
+- **Offline usage**: Uncomment `os.environ["HF_HUB_OFFLINE"] = "1"` in the script to force using local cache.
