@@ -14,7 +14,6 @@
     ```bash
     brew install ffmpeg
     ```
-3.  **Apple Silicon (M1/M2/M3)**: `mlx-whisper` 需要 Apple 芯片支持。
 
 ## 2. 基础环境安装
 
