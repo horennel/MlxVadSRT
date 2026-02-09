@@ -7,6 +7,11 @@
 
 `MlxVadSRT` is a high-performance speech-to-text tool based on MLX Whisper and Silero VAD, optimized for macOS (Apple Silicon). It supports automatic video audio extraction, Voice Activity Detection (VAD), and generation of standard SRT subtitle files.
 
+## Key Features
+
+-   **MLX Hardware Acceleration**: Leveraging Apple Silicon's unified memory architecture and Metal acceleration, `mlx-whisper` not only outperforms standard CPU inference by a wide margin but also rivals the performance of `whisper.cpp`, combining high efficiency with Python's ease of use.
+-   **VAD Smart Filtering**: By using `Silero VAD` to pre-detect and extract only speech segments, it not only boosts efficiency by skipping silence but also effectively prevents Whisper from hallucinating during silent periods, significantly improving transcription accuracy.
+
 ## 1. Environment Setup
 
 Before getting started, please ensure the following components are installed on your macOS system:
@@ -17,6 +22,9 @@ Before getting started, please ensure the following components are installed on 
     brew install ffmpeg
     ```
 3.  **Apple Silicon (M1/M2/M3)**: `mlx-whisper` requires Apple Silicon support.
+4.  **Memory**:
+    *   **16GB+ Unified Memory**: Recommended `mlx-community/whisper-large-v3-mlx`.
+    *   **8GB Unified Memory**: Recommended `mlx-community/whisper-large-v3-turbo`.
 
 ## 2. Basic Environment Installation
 
