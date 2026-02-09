@@ -7,6 +7,11 @@
 
 `MlxVadSRT` 是一个基于 MLX Whisper 和 Silero VAD 的高性能语音转文字工具，专为 macOS (Apple Silicon) 优化。它支持自动提取视频音频、人声检测（VAD）以及生成标准 SRT 字幕文件。
 
+## 核心特色
+
+-   **MLX 硬件加速**：利用 Apple Silicon 的统一内存架构和 Metal 加速，`mlx-whisper` 不仅速度远超普通 CPU 推理，更能媲美 `whisper.cpp`，兼顾高性能与 Python 生态的易用性。
+-   **VAD 智能过滤**：通过 `Silero VAD` 预先检测并仅提取人声片段，不仅能跳过静音区域大幅提升效率，更能有效避免 Whisper 在静音片段产生幻觉（Hallucination），显著提升转录准确度。
+
 ## 1. 环境准备
 
 在开始之前，请确保您的 macOS 系统已安装以下基础组件：
@@ -17,6 +22,9 @@
     brew install ffmpeg
     ```
 3.  **Apple Silicon (M1/M2/M3)**: `mlx-whisper` 需要 Apple 芯片支持。
+4.  **内存建议**:
+    *   **16GB+ 统一内存**: 推荐使用 `mlx-community/whisper-large-v3-mlx`。
+    *   **8GB 统一内存**: 推荐使用 `mlx-community/whisper-large-v3-turbo`。
 
 ## 2. 基础环境安装
 
