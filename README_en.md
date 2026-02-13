@@ -13,6 +13,7 @@
 -   **VAD Smart Filtering**: By using `Silero VAD` to pre-detect and extract only speech segments, it not only boosts efficiency by skipping silence but also effectively prevents Whisper from hallucinating during silent periods, significantly improving transcription accuracy.
 -   **Subtitle Translation**: Supports translating transcribed subtitles to a specified language, using OpenAI-compatible APIs with automatic fallback to local Ollama.
 -   **Standalone Translation Mode**: Supports directly translating existing SRT subtitle files without re-transcription.
+-   **Soft Subtitle Embedding**: Supports embedding SRT subtitles as soft subtitles (not hardcoded) into video files using ffmpeg muxing, without re-encoding the video.
 
 ## 1. Environment Setup
 
@@ -133,16 +134,18 @@ If the above variables are not configured, the program will attempt to fall back
 | **Transcribe and translate to English** | `mlxvad --video demo.mp4 --lang ja --to en` |
 | **Translate existing subtitle file** | `mlxvad --srt subtitle.srt --to en` |
 | **Translate subtitle with custom output** | `mlxvad --srt subtitle.srt --to zh --output translated.srt` |
+| **Embed soft subtitles into video** | `mlxvad --embed --video demo.mp4 --srt demo.zh.srt` |
 
 ## 6. Parameter Description
 
-- `--audio`: Input audio file path. **Mutually exclusive** with `--video` and `--srt`, only one can be specified.
-- `--video`: Input video file path. **Mutually exclusive** with `--audio` and `--srt`, only one can be specified.
-- `--srt`: Input existing SRT subtitle file path (translation-only mode). **Mutually exclusive** with `--audio` and `--video`. **Must be used with `--to`**.
+- `--audio`: Input audio file path. In transcription mode, only one of `--audio`, `--video`, `--srt` can be specified.
+- `--video`: Input video file path. In transcription mode, only one of `--audio`, `--video`, `--srt` can be specified. In embed mode (`--embed`), must be used with `--srt`.
+- `--srt`: Input existing SRT subtitle file path. In translation mode, **must be used with `--to`**. In embed mode (`--embed`), must be used with `--video`.
+- `--embed`: Embed the subtitle specified by `--srt` as a soft subtitle (not hardcoded) into the video specified by `--video`. Requires both `--video` and `--srt`. Automatically infers language tag from filename (e.g., `demo.zh.srt` → Chinese).
 - `--lang`: Specify language (default: `auto` for auto-detection, options: `zh, en, ja, ko, auto`). Only effective in transcription mode.
 - `--to`: Translate subtitles to the specified language (default: no translation, options: `zh, en, ja, ko`). Cannot be the same as `--lang` in transcription mode.
 - `--model`: MLX model path or HF repository (default: `mlx-community/whisper-large-v3-mlx`). **Note**: Only supports `mlx-community/whisper` series models. Only effective in transcription mode.
-- `--output`: Output SRT filename (default: `output.srt`). When using `--srt` mode without specifying, it is automatically named `originalname.targetlang.srt`.
+- `--output`: Output SRT filename (default: `output.srt`). When used with `--to`, if explicitly specified the translated file is saved to that path; otherwise it is automatically named `originalname.targetlang.srt`.
 
 ---
 
@@ -173,7 +176,7 @@ mlxvad --audio interview.wav --lang auto
 ```bash
 mlxvad --video anime.mp4 --lang ja --to zh --output anime.srt
 ```
-This will generate two files: `anime.srt` (original Japanese subtitles) and `anime.zh.srt` (translated Chinese subtitles).
+This will generate two files: `anime.original.srt` (original Japanese subtitles) and `anime.srt` (translated Chinese subtitles).
 
 ### Scenario: Translate an existing SRT subtitle file
 If you already have an English subtitle file and want to translate it to Chinese:
@@ -185,10 +188,17 @@ The output file is automatically named `english.zh.srt`. You can also use `--out
 mlxvad --srt english.srt --to zh --output chinese_subtitle.srt
 ```
 
+### Scenario: Embed subtitles into video
+After transcription and translation, embed Chinese subtitles into the video (soft subtitles, no re-encoding):
+```bash
+mlxvad --embed --video anime.mp4 --srt anime.srt
+```
+Subtitles will be embedded directly into `anime.mp4`, and the player can toggle subtitles on/off. If the subtitle filename contains a language suffix (e.g., `anime.zh.srt`), the language tag will be set automatically.
+
 ---
 
 ## FAQ
 - **First run**: The program will automatically download models from Hugging Face, please ensure network connectivity.
 - **Offline usage**: Uncomment `os.environ["HF_HUB_OFFLINE"] = "1"` in the script to force using local cache.
-- **Translation timeout**: If the translation API responds slowly, you can modify the `TRANSLATE_API_TIMEOUT` constant in the script (default: 300 seconds).
-- **Missing dialogue**: If some speech segments are not recognized, try lowering the `VAD_THRESHOLD` value in the script (default: 0.2, minimum: 0.1).
+- **Translation timeout**: If the translation API responds slowly, you can modify the `TRANSLATE_API_TIMEOUT` constant in the script (default: 200 seconds).
+- **Missing dialogue**: If some speech segments are not recognized, try lowering the `VAD_THRESHOLD` value in the script (default: 0.25, minimum: 0.1).
