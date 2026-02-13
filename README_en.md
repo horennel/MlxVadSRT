@@ -11,6 +11,8 @@
 
 -   **MLX Hardware Acceleration**: Leveraging Apple Silicon's unified memory architecture and Metal acceleration, `mlx-whisper` not only outperforms standard CPU inference by a wide margin but also rivals the performance of `whisper.cpp`, combining high efficiency with Python's ease of use.
 -   **VAD Smart Filtering**: By using `Silero VAD` to pre-detect and extract only speech segments, it not only boosts efficiency by skipping silence but also effectively prevents Whisper from hallucinating during silent periods, significantly improving transcription accuracy.
+-   **Subtitle Translation**: Supports translating transcribed subtitles to a specified language, using OpenAI-compatible APIs with automatic fallback to local Ollama.
+-   **Standalone Translation Mode**: Supports directly translating existing SRT subtitle files without re-transcription.
 
 ## 1. Environment Setup
 
@@ -92,7 +94,34 @@ Package the script and its dependencies into a standalone binary file.
 
 ---
 
-## 4. Common Command Examples
+## 4. Environment Variable Configuration
+
+This project uses environment variables to configure model download sources and translation APIs.
+
+### 4.1. Model Download Acceleration (Hugging Face)
+
+By default, the program automatically uses a mirror site (`hf-mirror.com`) to accelerate model downloads.
+If you need to use the official source or a custom mirror, you can set `HF_ENDPOINT`:
+
+```bash
+export HF_ENDPOINT="https://huggingface.co"
+```
+
+### 4.2. Translation Function (LLM API)
+
+When using the `--to` parameter, the program calls an OpenAI-compatible API. Please set the following environment variables:
+
+```bash
+export LLM_API_KEY="your-api-key"
+export LLM_BASE_URL="https://api.openai.com/v1"
+export LLM_MODEL="gpt-4o"
+```
+
+If the above variables are not configured, the program will attempt to fall back to local Ollama (`http://localhost:11434/v1`, model `qwen3:8b`).
+
+---
+
+## 5. Common Command Examples
 
 | Scenario | Command |
 | :--- | :--- |
@@ -100,19 +129,24 @@ Package the script and its dependencies into a standalone binary file.
 | **Transcribe audio (auto-detect language)** | `mlxvad --audio record.mp3 --lang auto` |
 | **Specify output filename** | `mlxvad --audio test.wav --output result.srt` |
 | **Use smaller model (faster)** | `mlxvad --audio test.wav --model mlx-community/whisper-tiny-mlx` |
+| **Transcribe and translate to Chinese** | `mlxvad --audio lecture.mp3 --lang en --to zh` |
+| **Transcribe and translate to English** | `mlxvad --video demo.mp4 --lang ja --to en` |
+| **Translate existing subtitle file** | `mlxvad --srt subtitle.srt --to en` |
+| **Translate subtitle with custom output** | `mlxvad --srt subtitle.srt --to zh --output translated.srt` |
 
-## 5. Parameter Description
+## 6. Parameter Description
 
-- `--audio`: Input audio file path. **Mutually exclusive** with `--video`, only one can be specified.
-- `--video`: Input video file path. **Mutually exclusive** with `--audio`, only one can be specified.
-- `--lang`: Specify language (default: `auto` for auto-detection, options: `zh, en, ja, ko, auto`).
-- `--model`: MLX model path or HF repository (default: `mlx-community/whisper-large-v3-mlx`). **Note**: Only supports `mlx-community/whisper` series models.
-- `--output`: Output SRT filename (default: `output.srt`).
-- `--sample_rate`: Sample rate (default: `16000`).
+- `--audio`: Input audio file path. **Mutually exclusive** with `--video` and `--srt`, only one can be specified.
+- `--video`: Input video file path. **Mutually exclusive** with `--audio` and `--srt`, only one can be specified.
+- `--srt`: Input existing SRT subtitle file path (translation-only mode). **Mutually exclusive** with `--audio` and `--video`. **Must be used with `--to`**.
+- `--lang`: Specify language (default: `auto` for auto-detection, options: `zh, en, ja, ko, auto`). Only effective in transcription mode.
+- `--to`: Translate subtitles to the specified language (default: no translation, options: `zh, en, ja, ko`). Cannot be the same as `--lang` in transcription mode.
+- `--model`: MLX model path or HF repository (default: `mlx-community/whisper-large-v3-mlx`). **Note**: Only supports `mlx-community/whisper` series models. Only effective in transcription mode.
+- `--output`: Output SRT filename (default: `output.srt`). When using `--srt` mode without specifying, it is automatically named `originalname.targetlang.srt`.
 
 ---
 
-## 6. Usage Examples
+## 7. Usage Examples
 
 ### Scenario: Transcribe a Youtube video (downloaded locally)
 Suppose you have downloaded a tutorial video named `lecture.mp4` and want to generate Chinese subtitles:
@@ -135,8 +169,26 @@ If you're unsure about the language in the audio:
 mlxvad --audio interview.wav --lang auto
 ```
 
+### Scenario: Transcribe a Japanese video and translate to Chinese
+```bash
+mlxvad --video anime.mp4 --lang ja --to zh --output anime.srt
+```
+This will generate two files: `anime.srt` (original Japanese subtitles) and `anime.zh.srt` (translated Chinese subtitles).
+
+### Scenario: Translate an existing SRT subtitle file
+If you already have an English subtitle file and want to translate it to Chinese:
+```bash
+mlxvad --srt english.srt --to zh
+```
+The output file is automatically named `english.zh.srt`. You can also use `--output` to specify the output path:
+```bash
+mlxvad --srt english.srt --to zh --output chinese_subtitle.srt
+```
+
 ---
 
 ## FAQ
 - **First run**: The program will automatically download models from Hugging Face, please ensure network connectivity.
 - **Offline usage**: Uncomment `os.environ["HF_HUB_OFFLINE"] = "1"` in the script to force using local cache.
+- **Translation timeout**: If the translation API responds slowly, you can modify the `TRANSLATE_API_TIMEOUT` constant in the script (default: 300 seconds).
+- **Missing dialogue**: If some speech segments are not recognized, try lowering the `VAD_THRESHOLD` value in the script (default: 0.2, minimum: 0.1).
