@@ -38,8 +38,8 @@ LANG_NAMES: dict[str, str] = {
 }
 
 # ── VAD 参数常量 ──────────────────────────────────────────
-VAD_THRESHOLD = 0.2  # 语音概率阈值，越低越敏感（0.2 可捕获轻声/背景语音）
-VAD_MIN_SILENCE_MS = 500  # 最短静音时长(ms)，低于此值的停顿不切分片段
+VAD_THRESHOLD = 0.25  # 语音概率阈值，越低越敏感（0.2 可捕获轻声/背景语音）
+VAD_MIN_SILENCE_MS = 600  # 最短静音时长(ms)，低于此值的停顿不切分片段
 VAD_MIN_SPEECH_MS = 50  # 最短语音时长(ms)，50ms 可保留单字/语气词
 VAD_SPEECH_PAD_MS = 300  # 语音片段前后填充(ms)，300ms 避免句首尾被截断
 
@@ -201,10 +201,15 @@ def check_translate_api(api_key: str, base_url: str, model: str) -> None:
             if resp.status == 200:
                 print("翻译API连接正常。")
                 return
-    except Exception:
-        pass
+            print(f"错误: 翻译API返回异常状态码 {resp.status}。")
+    except urllib.error.HTTPError as e:
+        print(f"错误: 翻译API请求失败 (HTTP {e.code}): {e.reason}")
+    except urllib.error.URLError as e:
+        print(f"错误: 无法连接翻译API: {e.reason}")
+    except Exception as e:
+        print(f"错误: 翻译API检查异常: {e}")
 
-    print("错误: 翻译API不可用，请检查环境变量 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 是否正确。")
+    print("请检查环境变量 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 是否正确。")
     sys.exit(1)
 
 
@@ -253,7 +258,10 @@ def translate_batch(
         result = json.loads(resp.read().decode("utf-8"))
 
     content = result["choices"][0]["message"]["content"]
-    return json.loads(_strip_markdown_code_block(content))
+    parsed = json.loads(_strip_markdown_code_block(content))
+    if not isinstance(parsed, list):
+        raise ValueError(f"翻译API返回了非数组类型: {type(parsed).__name__}")
+    return parsed
 
 
 def _pad_or_truncate(translated: list[str], batch: list[str]) -> list[str]:
@@ -336,6 +344,7 @@ def translate_srt_entries(
 # ── 核心转录流程 ─────────────────────────────────────────
 
 def transcribe_with_vad(args: argparse.Namespace) -> None:
+    task_start = time.time()
     check_dependencies()
 
     input_file = args.audio or args.video
@@ -452,24 +461,45 @@ def transcribe_with_vad(args: argparse.Namespace) -> None:
         return
 
     # ── 保存原始字幕 ──
-    output_path = os.path.abspath(args.output)
-    _save_srt(srt_entries, output_path)
-    print(f"原始字幕已保存至: {output_path}")
+    effective_output = args.output or "output.srt"
+    output_path = os.path.abspath(effective_output)
+
+    if args.to and args.output:
+        # 用户显式指定了 --output 且需要翻译：
+        # 原始字幕保存到派生路径，翻译文件使用 --output 路径
+        base, ext = os.path.splitext(output_path)
+        original_path = f"{base}.original{ext}"
+        translated_path = output_path
+    elif args.to:
+        # 需要翻译但未指定 --output：原始字幕用默认路径，翻译加语言后缀
+        original_path = output_path
+        base, ext = os.path.splitext(output_path)
+        translated_path = f"{base}.{args.to}{ext}"
+    else:
+        # 仅转录，不翻译
+        original_path = output_path
+
+    _save_srt(srt_entries, original_path)
+    print(f"原始字幕已保存至: {original_path}")
 
     # 释放语音识别资源，回收内存
-    del vad_model, wav, speech_timestamps
-    gc.collect()
+    if vad_model is not None or wav is not None:
+        del vad_model, wav, speech_timestamps
+        gc.collect()
 
     # ── 可选翻译 ──
     if args.to:
-        base, ext = os.path.splitext(output_path)
-        translated_path = f"{base}.{args.to}{ext}"
         print()  # 翻译前空一行分隔
         _translate_and_save(srt_entries, args.to, args.translate_config, translated_path)
+
+    elapsed = time.time() - task_start
+    minutes, seconds = divmod(int(elapsed), 60)
+    print(f"\n--- 任务完成 (耗时 {minutes}分{seconds}秒) ---")
 
 
 def translate_srt_file(args: argparse.Namespace) -> None:
     """直接翻译已有的 SRT 字幕文件"""
+    task_start = time.time()
     srt_path = os.path.abspath(args.srt)
 
     if not srt_path.lower().endswith(".srt"):
@@ -485,13 +515,17 @@ def translate_srt_file(args: argparse.Namespace) -> None:
     print(f"读取到 {len(srt_entries)} 条字幕。")
 
     # 生成输出路径
-    if args.output != "output.srt":
+    if args.output is not None:
         translated_path = os.path.abspath(args.output)
     else:
         base, ext = os.path.splitext(srt_path)
         translated_path = f"{base}.{args.to}{ext}"
 
     _translate_and_save(srt_entries, args.to, args.translate_config, translated_path)
+
+    elapsed = time.time() - task_start
+    minutes, seconds = divmod(int(elapsed), 60)
+    print(f"\n--- 翻译任务完成 (耗时 {minutes}分{seconds}秒) ---")
 
 
 # ── 入口 ─────────────────────────────────────────────────
@@ -527,8 +561,8 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=str,
-        default="output.srt",
-        help="输出 SRT 文件名",
+        default=None,
+        help="输出 SRT 文件名 (默认: output.srt; 配合 --to 时指定翻译文件路径)",
     )
 
     if sys.platform != "darwin":
