@@ -47,7 +47,7 @@ VAD_SPEECH_PAD_MS = 300  # 语音片段前后填充(ms)，300ms 避免句首尾�
 TRANSLATE_BATCH_SIZE = 50  # 每批翻译的字幕条数
 TRANSLATE_MAX_RETRIES = 3  # 翻译请求最大重试次数
 TRANSLATE_RETRY_DELAY = 2  # 重试间隔(秒)
-TRANSLATE_API_TIMEOUT = 120  # 翻译请求超时(秒)
+TRANSLATE_API_TIMEOUT = 200  # 翻译请求超时(秒)
 
 # ── 其他常量 ──────────────────────────────────────────────
 SAMPLE_RATE = 16000  # VAD 和 Whisper 的标准采样率
