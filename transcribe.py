@@ -15,7 +15,9 @@ import subprocess
 import argparse
 import shutil
 import json
+import math
 import urllib.request
+import urllib.error
 import gc
 import time
 from typing import Optional
@@ -37,8 +39,16 @@ LANG_NAMES: dict[str, str] = {
     "auto": "自动检测",
 }
 
+# ffmpeg 字幕语言标签映射 (ISO 639-1 → ISO 639-2/B)
+FFMPEG_LANG_CODES: dict[str, str] = {
+    "zh": "chi",
+    "en": "eng",
+    "ja": "jpn",
+    "ko": "kor",
+}
+
 # ── VAD 参数常量 ──────────────────────────────────────────
-VAD_THRESHOLD = 0.25  # 语音概率阈值，越低越敏感（0.2 可捕获轻声/背景语音）
+VAD_THRESHOLD = 0.3  # 语音概率阈值，越低越敏感（0.2 可捕获轻声/背景语音）
 VAD_MIN_SILENCE_MS = 600  # 最短静音时长(ms)，低于此值的停顿不切分片段
 VAD_MIN_SPEECH_MS = 50  # 最短语音时长(ms)，50ms 可保留单字/语气词
 VAD_SPEECH_PAD_MS = 300  # 语音片段前后填充(ms)，300ms 避免句首尾被截断
@@ -48,6 +58,9 @@ TRANSLATE_BATCH_SIZE = 50  # 每批翻译的字幕条数
 TRANSLATE_MAX_RETRIES = 3  # 翻译请求最大重试次数
 TRANSLATE_RETRY_DELAY = 2  # 重试间隔(秒)
 TRANSLATE_API_TIMEOUT = 200  # 翻译请求超时(秒)
+
+# ── 类型别名 ──────────────────────────────────────────────
+TranslateConfig = tuple[str, str, str]  # (api_key, base_url, model_name)
 
 # ── 其他常量 ──────────────────────────────────────────────
 SAMPLE_RATE = 16000  # VAD 和 Whisper 的标准采样率
@@ -94,11 +107,11 @@ def load_audio_with_ffmpeg(file_path: str, sr: int = SAMPLE_RATE) -> Optional[to
         "-",
     ]
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        raw_bytes, _ = proc.communicate()
-        if proc.returncode != 0:
-            return None
-        return torch.from_numpy(np.frombuffer(raw_bytes, dtype=np.float32).copy())
+        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:
+            raw_bytes, _ = proc.communicate()
+            if proc.returncode != 0:
+                return None
+            return torch.from_numpy(np.frombuffer(raw_bytes, dtype=np.float32).copy())
     except Exception as e:
         print(f"调用 ffmpeg 失败: {e}")
         return None
@@ -108,9 +121,9 @@ def format_timestamp(seconds: float) -> str:
     """将秒数转换为 SRT 时间戳格式 (HH:MM:SS,mmm)"""
     total_ms = round(seconds * 1000)
     total_seconds, millis = divmod(total_ms, 1000)
-    minutes, secs = divmod(total_seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+    mins, secs = divmod(total_seconds, 60)
+    hours, mins = divmod(mins, 60)
+    return f"{hours:02d}:{mins:02d}:{secs:02d},{millis:03d}"
 
 
 def _save_srt(srt_entries: list[str], output_path: str) -> None:
@@ -144,7 +157,7 @@ def _parse_srt_file(srt_path: str) -> Optional[list[str]]:
 def _translate_and_save(
         srt_entries: list[str],
         target_lang: str,
-        translate_config: tuple[str, str, str],
+        translate_config: TranslateConfig,
         output_path: str,
 ) -> None:
     """翻译字幕条目并保存到文件"""
@@ -162,7 +175,7 @@ def _translate_and_save(
 
 # ── 翻译相关 ─────────────────────────────────────────────
 
-def get_translate_config() -> tuple[str, str, str]:
+def get_translate_config() -> TranslateConfig:
     """从环境变量获取翻译API配置，缺失则回退到本地 Ollama"""
     api_key = os.environ.get("LLM_API_KEY", "")
     base_url = os.environ.get("LLM_BASE_URL", "")
@@ -289,7 +302,7 @@ def translate_srt_entries(
         texts.append(parts[2] if len(parts) > 2 else "")
 
     translated_texts: list[str] = []
-    total_batches = -(-len(texts) // TRANSLATE_BATCH_SIZE)  # 向上取整
+    total_batches = math.ceil(len(texts) / TRANSLATE_BATCH_SIZE)
 
     for batch_idx in range(0, len(texts), TRANSLATE_BATCH_SIZE):
         batch = texts[batch_idx: batch_idx + TRANSLATE_BATCH_SIZE]
@@ -528,16 +541,106 @@ def translate_srt_file(args: argparse.Namespace) -> None:
     print(f"\n--- 翻译任务完成 (耗时 {minutes}分{seconds}秒) ---")
 
 
+def embed_subtitle(args: argparse.Namespace) -> None:
+    """将 SRT 字幕作为软字幕（非硬编码）嵌入视频文件"""
+    task_start = time.time()
+    check_dependencies()
+
+    video_path = os.path.abspath(args.video)
+    srt_path = os.path.abspath(args.srt)
+
+    if not os.path.exists(video_path):
+        print(f"错误: 找不到视频文件 {video_path}")
+        return
+    if not os.path.exists(srt_path):
+        print(f"错误: 找不到字幕文件 {srt_path}")
+        return
+
+    print("--- 字幕嵌入任务开始 ---")
+    print(f"视频文件: {os.path.basename(video_path)}")
+    print(f"字幕文件: {os.path.basename(srt_path)}")
+
+    # 根据容器格式选择字幕编码
+    video_ext = os.path.splitext(video_path)[1].lower()
+    if video_ext in (".mkv",):
+        sub_codec = "srt"
+    elif video_ext in (".mp4", ".m4v", ".mov"):
+        sub_codec = "mov_text"
+    else:
+        print(f"警告: {video_ext} 格式可能不支持软字幕，尝试使用 mov_text 编码...")
+        sub_codec = "mov_text"
+
+    # 尝试从文件名推断字幕语言 (如 xxx.zh.srt → chi)
+    srt_base = os.path.splitext(os.path.basename(srt_path))[0]  # 去掉 .srt
+    lang_part = srt_base.rsplit(".", 1)[-1] if "." in srt_base else ""
+    ffmpeg_lang = FFMPEG_LANG_CODES.get(lang_part, "und")
+
+    # 输出到临时文件，成功后替换原视频
+    base, _ = os.path.splitext(video_path)
+    temp_output = f"{base}.tmp{video_ext}"
+
+    cmd = [
+        "ffmpeg",
+        "-i", video_path,
+        "-i", srt_path,
+        "-c", "copy",
+        "-c:s", sub_codec,
+        "-map", "0:v",
+        "-map", "0:a?",
+        "-map", "1",
+        "-metadata:s:s:0", f"language={ffmpeg_lang}",
+        "-y",
+        temp_output,
+    ]
+
+    if ffmpeg_lang != "und":
+        print(f"正在嵌入字幕 (编码: {sub_codec}, 语言: {ffmpeg_lang})...")
+    else:
+        print(f"正在嵌入字幕 (编码: {sub_codec})...")
+
+    embed_ok = False
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            error_lines = result.stderr.strip().split("\n")[-5:]
+            print(f"字幕嵌入失败:\n" + "\n".join(error_lines))
+            return
+        embed_ok = True
+    except Exception as e:
+        print(f"调用 ffmpeg 失败: {e}")
+        return
+    finally:
+        # 仅在嵌入失败时清理临时文件（成功时由后续 os.replace 处理）
+        if not embed_ok and os.path.exists(temp_output):
+            os.remove(temp_output)
+
+    # 替换原视频文件
+    try:
+        os.replace(temp_output, video_path)
+        print(f"字幕已嵌入至: {video_path}")
+    except OSError as e:
+        print(f"替换原文件失败: {e}")
+        print(f"带字幕的视频已保存至: {temp_output}")
+
+    elapsed = time.time() - task_start
+    minutes, seconds = divmod(int(elapsed), 60)
+    print(f"\n--- 嵌入任务完成 (耗时 {minutes}分{seconds}秒) ---")
+
+
 # ── 入口 ─────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="使用 MLX 和 VAD 加速转录音频或视频为 SRT"
     )
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--audio", type=str, help="输入音频文件路径")
-    group.add_argument("--video", type=str, help="输入视频文件路径")
-    group.add_argument("--srt", type=str, help="输入已有 SRT 字幕文件路径 (仅翻译，需配合 --to)")
+    parser.add_argument("--audio", type=str, help="输入音频文件路径")
+    parser.add_argument("--video", type=str, help="输入视频文件路径")
+    parser.add_argument("--srt", type=str, help="输入已有 SRT 字幕文件路径")
+    parser.add_argument(
+        "--embed",
+        action="store_true",
+        help="将 --srt 字幕作为软字幕嵌入 --video 视频 (需同时指定 --video 和 --srt)",
+    )
     parser.add_argument(
         "--lang",
         type=str,
@@ -570,7 +673,24 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # --srt 模式必须指定 --to
+    # ── 嵌入模式 ──
+    if args.embed:
+        if not args.video or not args.srt:
+            print("错误: --embed 需要同时指定 --video (视频文件) 和 --srt (字幕文件)。")
+            sys.exit(1)
+        embed_subtitle(args)
+        return
+
+    # ── 非嵌入模式：必须且只能指定 --audio, --video, --srt 中的一个 ──
+    input_count = sum(1 for x in [args.audio, args.video, args.srt] if x)
+    if input_count == 0:
+        print("错误: 请指定 --audio, --video, --srt 中的一个 (或使用 --embed 模式)。")
+        sys.exit(1)
+    if input_count > 1:
+        print("错误: --audio, --video, --srt 不能同时使用 (嵌入字幕请用 --embed)。")
+        sys.exit(1)
+
+    # --srt 翻译模式必须指定 --to
     if args.srt and not args.to:
         print("错误: 使用 --srt 时必须同时指定 --to 目标语言。")
         sys.exit(1)
