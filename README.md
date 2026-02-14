@@ -11,9 +11,23 @@
 
 -   **MLX 硬件加速**：利用 Apple Silicon 的统一内存架构和 Metal 加速，`mlx-whisper` 不仅速度远超普通 CPU 推理，更能媲美 `whisper.cpp`，兼顾高性能与 Python 生态的易用性。
 -   **VAD 智能过滤**：通过 `Silero VAD` 预先检测并仅提取人声片段，不仅能跳过静音区域大幅提升效率，更能有效避免 Whisper 在静音片段产生幻觉（Hallucination），显著提升转录准确度。
+-   **人声提取 (去噪)**：可选使用 MDX-NET 模型提取人声，去除背景音乐和音效，进一步提升嘈杂音频的转录质量。
 -   **字幕翻译**：支持将转录后的字幕翻译为指定语言，使用 OpenAI 兼容 API，支持自动回退到本地 Ollama。
 -   **独立翻译模式**：支持直接翻译已有的 SRT 字幕文件，无需重新转录。
--   **软字幕嵌入**：支持将 SRT 字幕作为软字幕（非硬编码）嵌入视频文件，使用 ffmpeg 封装，不重新编码视频。
+-   **软字幕嵌入**：支持将 SRT 字幕作为软字幕（非硬编码）嵌入视频文件，使用 ffmpeg 封装，不重新编码视频。输出到新文件，不覆盖原视频。
+
+## 项目结构
+
+```
+MlxVadSRT/
+├── main.py          # 入口：命令行参数解析与主流程调度
+├── config.py        # 全局常量与配置（零依赖）
+├── utils.py         # 通用工具：音频读取、SRT 格式化/解析、文件类型检测
+├── transcribe.py    # 核心转录：VAD 分段 + Whisper 逐段转录
+├── denoise.py       # 人声提取：MDX-NET 模型去除 BGM/音效
+├── translate.py     # 翻译模块：LLM API 批量翻译字幕
+└── embed.py         # 字幕嵌入：FFmpeg 软字幕封装
+```
 
 ## 1. 环境准备
 
@@ -41,6 +55,9 @@ source venv/bin/activate
 
 # 安装核心依赖
 pip install torch numpy mlx-whisper
+
+# 可选：安装人声提取依赖 (用于 --denoise 功能)
+pip install "audio-separator[cpu]"
 ```
 
 ---
@@ -58,8 +75,8 @@ pip install torch numpy mlx-whisper
 
 2.  **添加别名**（请根据实际路径替换）：
     ```bash
-    # 假设项目在 ~/opt 目录下
-    alias mlxvad='~/opt/venv/bin/python3 ~/opt/transcribe.py'
+    # 假设项目在 ~/opt/MlxVadSRT 目录下
+    alias mlxvad='~/opt/venv/bin/python3 ~/opt/MlxVadSRT/main.py'
     ```
 
 3.  **生效配置**：
@@ -85,7 +102,7 @@ pip install torch numpy mlx-whisper
                 --name mlxvad \
                 --collect-all mlx_whisper \
                 --collect-all torch \
-                transcribe.py
+                main.py
     ```
 
 3.  **移动到系统路径**（可选）：
@@ -132,6 +149,8 @@ export LLM_MODEL="gpt-4o"
 | **使用更小的模型 (加速)** | `mlxvad --audio test.wav --model mlx-community/whisper-tiny-mlx` |
 | **转录并翻译为中文** | `mlxvad --audio lecture.mp3 --lang en --to zh` |
 | **转录并翻译为英文** | `mlxvad --video demo.mp4 --lang ja --to en` |
+| **去噪后转录 (有 BGM)** | `mlxvad --video movie.mp4 --lang zh --denoise` |
+| **去噪 + 转录 + 翻译** | `mlxvad --video movie.mkv --lang en --to zh --denoise` |
 | **翻译已有字幕文件** | `mlxvad --srt subtitle.srt --to en` |
 | **翻译已有字幕并指定输出** | `mlxvad --srt subtitle.srt --to zh --output translated.srt` |
 | **嵌入软字幕到视频** | `mlxvad --embed --video demo.mp4 --srt demo.zh.srt` |
@@ -141,11 +160,12 @@ export LLM_MODEL="gpt-4o"
 - `--audio`: 输入音频文件路径。转录模式下与 `--video`、`--srt` 只能指定其中一个。
 - `--video`: 输入视频文件路径。转录模式下与 `--audio`、`--srt` 只能指定其中一个。嵌入模式（`--embed`）下需配合 `--srt` 使用。
 - `--srt`: 输入已有 SRT 字幕文件路径。翻译模式下**必须配合 `--to` 使用**；嵌入模式（`--embed`）下需配合 `--video` 使用。
-- `--embed`: 将 `--srt` 指定的字幕作为软字幕（非硬编码）嵌入 `--video` 指定的视频。需同时指定 `--video` 和 `--srt`。自动从文件名推断语言标签（如 `demo.zh.srt` → 中文）。
+- `--embed`: 将 `--srt` 指定的字幕作为软字幕（非硬编码）嵌入 `--video` 指定的视频。需同时指定 `--video` 和 `--srt`。输出为新文件（如 `demo_embedded.mp4`），不覆盖原视频。嵌入成功后自动删除源 SRT 文件。自动从文件名推断语言标签（如 `demo.zh.srt` → 中文）。
 - `--lang`: 指定语言 (默认: `auto` 自动检测, 可选: `zh, en, ja, ko, auto`)。仅在转录模式下有效。
 - `--to`: 将字幕翻译为指定语言 (默认: 不翻译, 可选: `zh, en, ja, ko`)。转录模式下不能与 `--lang` 相同。
 - `--model`: MLX 模型路径或 HF 仓库 (默认: `mlx-community/whisper-large-v3-mlx`)。**注意**：仅支持 `mlx-community/whisper` 系列模型。仅在转录模式下有效。
-- `--output`: 输出 SRT 文件名 (默认: `output.srt`)。配合 `--to` 使用时，显式指定则翻译文件保存到该路径，未指定则自动命名为 `原文件名.目标语言.srt`。
+- `--output`: 输出 SRT 文件名 (默认: 跟随输入文件名，如 `demo.mp4` → `demo.srt`)。配合 `--to` 使用时，显式指定则翻译文件保存到该路径，未指定则自动命名为 `原文件名.目标语言.srt`。
+- `--denoise`: 转录前先用 MDX-NET 模型提取人声，去除背景音乐和音效。需额外安装 `audio-separator` 库。适用于电影、电视剧、综艺等有 BGM 的场景。
 
 ---
 
@@ -178,6 +198,20 @@ mlxvad --video anime.mp4 --lang ja --to zh --output anime.srt
 ```
 执行后会生成两个文件：`anime.original.srt`（原始日语字幕）和 `anime.srt`（翻译后的中文字幕）。
 
+### 场景：去噪后转录（有背景音乐的电影/电视剧）
+对于有大量 BGM 和音效的视频，使用 `--denoise` 可以显著提升转录质量：
+
+```bash
+mlxvad --video movie.mp4 --lang zh --denoise
+```
+
+处理流程：先用 MDX-NET 提取人声 → 再用 VAD 检测语音片段 → 最后用 Whisper 逐段转录。模型会自动下载到 `~/.cache/audio-separator-models/`，首次使用约需下载 100-200MB。
+
+### 场景：去噪 + 转录 + 翻译一条龙
+```bash
+mlxvad --video movie.mkv --lang en --to zh --denoise
+```
+
 ### 场景：翻译已有的 SRT 字幕文件
 如果你已经有一份英文字幕，想翻译为中文：
 ```bash
@@ -193,12 +227,26 @@ mlxvad --srt english.srt --to zh --output chinese_subtitle.srt
 ```bash
 mlxvad --embed --video anime.mp4 --srt anime.srt
 ```
-字幕会直接嵌入到 `anime.mp4` 中，播放器可选择开关字幕。如果字幕文件名包含语言后缀（如 `anime.zh.srt`），语言标签会自动设置。
+字幕会嵌入到新文件 `anime_embedded.mp4` 中（不覆盖原视频），嵌入成功后源 SRT 文件会被自动删除。如果字幕文件名包含语言后缀（如 `anime.zh.srt`），语言标签会自动设置。
+
+---
+
+## 8. `--denoise` 适用场景建议
+
+| 场景 | 是否推荐 `--denoise` |
+|------|:---:|
+| 电影/电视剧（有配乐） | ✅ 推荐 |
+| 动作片（爆炸/打斗 + 对白） | ✅ 强烈推荐 |
+| 综艺/真人秀 | ✅ 推荐 |
+| 纯对话播客/会议录音 | ❌ 不需要 |
+| 纪录片（旁白为主） | ⚠️ 看情况 |
 
 ---
 
 ## 常见问题
 - **首次运行**: 程序会自动从 Hugging Face 下载模型，请保持网络畅通。
-- **离线使用**: 在脚本中取消 `os.environ["HF_HUB_OFFLINE"] = "1"` 的注释，可强制使用本地缓存。
-- **翻译超时**: 如果翻译 API 响应较慢，可修改脚本中的 `TRANSLATE_API_TIMEOUT` 常量（默认 200 秒）。
-- **台词遗漏**: 如果发现部分语音未被识别到，可降低脚本中的 `VAD_THRESHOLD` 值（默认 0.25，最低 0.1）。
+- **离线使用**: 在 `main.py` 中取消 `os.environ["HF_HUB_OFFLINE"] = "1"` 的注释，可强制使用本地缓存。
+- **翻译超时**: 如果翻译 API 响应较慢，可修改 `config.py` 中的 `TRANSLATE_API_TIMEOUT` 常量（默认 200 秒）。
+- **台词遗漏**: 如果发现部分语音未被识别到，可降低 `config.py` 中的 `VAD_THRESHOLD` 值（默认 0.25，最低 0.1）。
+- **`--denoise` 报 ImportError**: 请确保安装了 `audio-separator` 库：`pip install "audio-separator[cpu]"`。
+- **`--denoise` 模型下载失败**: 模型缓存在 `~/.cache/audio-separator-models/`，可手动下载后放入该目录。

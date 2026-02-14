@@ -11,9 +11,23 @@
 
 -   **MLX Hardware Acceleration**: Leveraging Apple Silicon's unified memory architecture and Metal acceleration, `mlx-whisper` not only outperforms standard CPU inference by a wide margin but also rivals the performance of `whisper.cpp`, combining high efficiency with Python's ease of use.
 -   **VAD Smart Filtering**: By using `Silero VAD` to pre-detect and extract only speech segments, it not only boosts efficiency by skipping silence but also effectively prevents Whisper from hallucinating during silent periods, significantly improving transcription accuracy.
+-   **Vocal Extraction (Denoising)**: Optionally uses MDX-NET model to extract vocals, removing background music and sound effects for improved transcription quality on noisy audio.
 -   **Subtitle Translation**: Supports translating transcribed subtitles to a specified language, using OpenAI-compatible APIs with automatic fallback to local Ollama.
 -   **Standalone Translation Mode**: Supports directly translating existing SRT subtitle files without re-transcription.
--   **Soft Subtitle Embedding**: Supports embedding SRT subtitles as soft subtitles (not hardcoded) into video files using ffmpeg muxing, without re-encoding the video.
+-   **Soft Subtitle Embedding**: Supports embedding SRT subtitles as soft subtitles (not hardcoded) into video files using ffmpeg muxing, without re-encoding the video. Outputs to a new file, preserving the original.
+
+## Project Structure
+
+```
+MlxVadSRT/
+├── main.py          # Entry point: CLI argument parsing and workflow routing
+├── config.py        # Global constants and configuration (zero dependencies)
+├── utils.py         # Utilities: audio loading, SRT formatting/parsing, file type detection
+├── transcribe.py    # Core transcription: VAD segmentation + Whisper segment-by-segment
+├── denoise.py       # Vocal extraction: MDX-NET model for removing BGM/SFX
+├── translate.py     # Translation module: LLM API batch subtitle translation
+└── embed.py         # Subtitle embedding: FFmpeg soft subtitle muxing
+```
 
 ## 1. Environment Setup
 
@@ -41,6 +55,9 @@ source venv/bin/activate
 
 # Install core dependencies
 pip install torch numpy mlx-whisper
+
+# Optional: install vocal extraction dependency (for --denoise feature)
+pip install "audio-separator[cpu]"
 ```
 
 ---
@@ -58,8 +75,8 @@ Set up an alias in your terminal configuration file to directly call the Python 
 
 2.  **Add alias** (replace with your actual path):
     ```bash
-    # Assuming the project is in ~/opt directory
-    alias mlxvad='~/opt/venv/bin/python3 ~/opt/transcribe.py'
+    # Assuming the project is in ~/opt/MlxVadSRT directory
+    alias mlxvad='~/opt/venv/bin/python3 ~/opt/MlxVadSRT/main.py'
     ```
 
 3.  **Apply configuration**:
@@ -85,7 +102,7 @@ Package the script and its dependencies into a standalone binary file.
                 --name mlxvad \
                 --collect-all mlx_whisper \
                 --collect-all torch \
-                transcribe.py
+                main.py
     ```
 
 3.  **Move to system path** (optional):
@@ -132,6 +149,8 @@ If the above variables are not configured, the program will attempt to fall back
 | **Use smaller model (faster)** | `mlxvad --audio test.wav --model mlx-community/whisper-tiny-mlx` |
 | **Transcribe and translate to Chinese** | `mlxvad --audio lecture.mp3 --lang en --to zh` |
 | **Transcribe and translate to English** | `mlxvad --video demo.mp4 --lang ja --to en` |
+| **Denoise then transcribe (with BGM)** | `mlxvad --video movie.mp4 --lang zh --denoise` |
+| **Denoise + transcribe + translate** | `mlxvad --video movie.mkv --lang en --to zh --denoise` |
 | **Translate existing subtitle file** | `mlxvad --srt subtitle.srt --to en` |
 | **Translate subtitle with custom output** | `mlxvad --srt subtitle.srt --to zh --output translated.srt` |
 | **Embed soft subtitles into video** | `mlxvad --embed --video demo.mp4 --srt demo.zh.srt` |
@@ -141,11 +160,12 @@ If the above variables are not configured, the program will attempt to fall back
 - `--audio`: Input audio file path. In transcription mode, only one of `--audio`, `--video`, `--srt` can be specified.
 - `--video`: Input video file path. In transcription mode, only one of `--audio`, `--video`, `--srt` can be specified. In embed mode (`--embed`), must be used with `--srt`.
 - `--srt`: Input existing SRT subtitle file path. In translation mode, **must be used with `--to`**. In embed mode (`--embed`), must be used with `--video`.
-- `--embed`: Embed the subtitle specified by `--srt` as a soft subtitle (not hardcoded) into the video specified by `--video`. Requires both `--video` and `--srt`. Automatically infers language tag from filename (e.g., `demo.zh.srt` → Chinese).
+- `--embed`: Embed the subtitle specified by `--srt` as a soft subtitle (not hardcoded) into the video specified by `--video`. Requires both `--video` and `--srt`. Outputs to a new file (e.g., `demo_embedded.mp4`), preserving the original video. The source SRT file is automatically deleted after successful embedding. Automatically infers language tag from filename (e.g., `demo.zh.srt` → Chinese).
 - `--lang`: Specify language (default: `auto` for auto-detection, options: `zh, en, ja, ko, auto`). Only effective in transcription mode.
 - `--to`: Translate subtitles to the specified language (default: no translation, options: `zh, en, ja, ko`). Cannot be the same as `--lang` in transcription mode.
 - `--model`: MLX model path or HF repository (default: `mlx-community/whisper-large-v3-mlx`). **Note**: Only supports `mlx-community/whisper` series models. Only effective in transcription mode.
-- `--output`: Output SRT filename (default: `output.srt`). When used with `--to`, if explicitly specified the translated file is saved to that path; otherwise it is automatically named `originalname.targetlang.srt`.
+- `--output`: Output SRT filename (default: follows input filename, e.g., `demo.mp4` → `demo.srt`). When used with `--to`, if explicitly specified the translated file is saved to that path; otherwise it is automatically named `originalname.targetlang.srt`.
+- `--denoise`: Extract vocals using MDX-NET model before transcription, removing background music and sound effects. Requires `audio-separator` library. Ideal for movies, TV shows, and variety shows with BGM.
 
 ---
 
@@ -178,6 +198,20 @@ mlxvad --video anime.mp4 --lang ja --to zh --output anime.srt
 ```
 This will generate two files: `anime.original.srt` (original Japanese subtitles) and `anime.srt` (translated Chinese subtitles).
 
+### Scenario: Denoise then transcribe (movies/TV shows with BGM)
+For videos with heavy background music and sound effects, `--denoise` can significantly improve transcription quality:
+
+```bash
+mlxvad --video movie.mp4 --lang zh --denoise
+```
+
+Processing pipeline: MDX-NET vocal extraction → VAD speech detection → Whisper segment-by-segment transcription. The model is automatically downloaded to `~/.cache/audio-separator-models/` (~100-200MB on first use).
+
+### Scenario: Denoise + transcribe + translate (full pipeline)
+```bash
+mlxvad --video movie.mkv --lang en --to zh --denoise
+```
+
 ### Scenario: Translate an existing SRT subtitle file
 If you already have an English subtitle file and want to translate it to Chinese:
 ```bash
@@ -193,12 +227,26 @@ After transcription and translation, embed Chinese subtitles into the video (sof
 ```bash
 mlxvad --embed --video anime.mp4 --srt anime.srt
 ```
-Subtitles will be embedded directly into `anime.mp4`, and the player can toggle subtitles on/off. If the subtitle filename contains a language suffix (e.g., `anime.zh.srt`), the language tag will be set automatically.
+Subtitles will be embedded into a new file `anime_embedded.mp4` (original video is preserved). The source SRT file is automatically deleted after successful embedding. If the subtitle filename contains a language suffix (e.g., `anime.zh.srt`), the language tag will be set automatically.
+
+---
+
+## 8. `--denoise` Recommended Use Cases
+
+| Scenario | Recommend `--denoise`? |
+|----------|:---:|
+| Movies / TV shows (with soundtrack) | ✅ Recommended |
+| Action films (explosions/fights + dialogue) | ✅ Highly recommended |
+| Variety shows / reality TV | ✅ Recommended |
+| Pure dialogue podcasts / meeting recordings | ❌ Not needed |
+| Documentaries (mostly narration) | ⚠️ Depends |
 
 ---
 
 ## FAQ
 - **First run**: The program will automatically download models from Hugging Face, please ensure network connectivity.
-- **Offline usage**: Uncomment `os.environ["HF_HUB_OFFLINE"] = "1"` in the script to force using local cache.
-- **Translation timeout**: If the translation API responds slowly, you can modify the `TRANSLATE_API_TIMEOUT` constant in the script (default: 200 seconds).
-- **Missing dialogue**: If some speech segments are not recognized, try lowering the `VAD_THRESHOLD` value in the script (default: 0.25, minimum: 0.1).
+- **Offline usage**: Uncomment `os.environ["HF_HUB_OFFLINE"] = "1"` in `main.py` to force using local cache.
+- **Translation timeout**: If the translation API responds slowly, modify the `TRANSLATE_API_TIMEOUT` constant in `config.py` (default: 200 seconds).
+- **Missing dialogue**: If some speech segments are not recognized, try lowering the `VAD_THRESHOLD` value in `config.py` (default: 0.25, minimum: 0.1).
+- **`--denoise` ImportError**: Make sure `audio-separator` is installed: `pip install "audio-separator[cpu]"`.
+- **`--denoise` model download fails**: Models are cached at `~/.cache/audio-separator-models/`. You can manually download and place them there.
