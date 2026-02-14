@@ -143,24 +143,26 @@ export LLM_MODEL="gpt-4o"
 
 | 场景 | 命令 |
 | :--- | :--- |
-| **转录视频 (中文)** | `mlxvad --video demo.mp4 --lang zh` |
-| **转录音频 (自动检测语言)** | `mlxvad --audio record.mp3 --lang auto` |
-| **指定输出文件名** | `mlxvad --audio test.wav --output result.srt` |
-| **使用更小的模型 (加速)** | `mlxvad --audio test.wav --model mlx-community/whisper-tiny-mlx` |
-| **转录并翻译为中文** | `mlxvad --audio lecture.mp3 --lang en --to zh` |
-| **转录并翻译为英文** | `mlxvad --video demo.mp4 --lang ja --to en` |
-| **去噪后转录 (有 BGM)** | `mlxvad --video movie.mp4 --lang zh --denoise` |
-| **去噪 + 转录 + 翻译** | `mlxvad --video movie.mkv --lang en --to zh --denoise` |
-| **翻译已有字幕文件** | `mlxvad --srt subtitle.srt --to en` |
-| **翻译已有字幕并指定输出** | `mlxvad --srt subtitle.srt --to zh --output translated.srt` |
-| **嵌入软字幕到视频** | `mlxvad --embed --video demo.mp4 --srt demo.zh.srt` |
+| **基础转录 (中文)** | `mlxvad --video demo.mp4 --lang zh` |
+| **转录音频 (自动检测)** | `mlxvad --audio record.mp3 --lang auto` |
+| **转录 + 嵌入 (生成软字幕视频)** | `mlxvad --video demo.mp4 --embed` |
+| **转录 + 翻译 + 嵌入 (一条龙)** | `mlxvad --video demo.mp4 --to zh --embed` |
+| **纯翻译 (已有字幕)** | `mlxvad --srt source.srt --to zh` |
+| **纯嵌入 (已有字幕)** | `mlxvad --embed --video demo.mp4 --srt source.srt` |
+| **翻译 + 嵌入 (已有字幕)** | `mlxvad --embed --video demo.mp4 --srt source.srt --to zh` |
+| **去噪后转录 (有 BGM)** | `mlxvad --video movie.mp4 --denoise` |
+
+> **说明**：使用 `--denoise` 时，人声提取的临时文件会存放在系统临时目录（前缀 `mlxvadsrt_vocals_`），任务完成后自动清理。如果任务异常中断，可手动清理该目录。
 
 ## 6. 参数说明
 
 - `--audio`: 输入音频文件路径。转录模式下与 `--video`、`--srt` 只能指定其中一个。
-- `--video`: 输入视频文件路径。转录模式下与 `--audio`、`--srt` 只能指定其中一个。嵌入模式（`--embed`）下需配合 `--srt` 使用。
-- `--srt`: 输入已有 SRT 字幕文件路径。翻译模式下**必须配合 `--to` 使用**；嵌入模式（`--embed`）下需配合 `--video` 使用。
-- `--embed`: 将 `--srt` 指定的字幕作为软字幕（非硬编码）嵌入 `--video` 指定的视频。需同时指定 `--video` 和 `--srt`。输出为新文件（如 `demo_embedded.mp4`），不覆盖原视频。嵌入成功后自动删除源 SRT 文件。自动从文件名推断语言标签（如 `demo.zh.srt` → 中文）。
+- `--video`: 输入视频文件路径。转录模式下与 `--audio`、`--srt` 只能指定其中一个。嵌入模式（`--embed`）下**必须指定**。
+- `--srt`: 输入已有 SRT 字幕文件路径。翻译模式下配合 `--to` 使用；嵌入模式（`--embed`）下可选（若未提供，则自动从视频生成）。
+- `--embed`: 开启字幕嵌入模式。将生成的或指定的字幕作为软字幕嵌入视频。
+    - **配合 `--video` (无 `--srt`)**: 自动执行 [转录 -> (翻译) -> 嵌入] 全流程。
+    - **配合 `--video` + `--srt`**: 将指定字幕嵌入视频（若有 `--to` 则先翻译再嵌入）。
+    - **输出**: 生成新文件（如 `demo_embedded.mp4`），不覆盖原视频。嵌入成功后自动删除中间 SRT 文件。
 - `--lang`: 指定语言 (默认: `auto` 自动检测, 可选: `zh, en, ja, ko, auto`)。仅在转录模式下有效。
 - `--to`: 将字幕翻译为指定语言 (默认: 不翻译, 可选: `zh, en, ja, ko`)。转录模式下不能与 `--lang` 相同。
 - `--model`: MLX 模型路径或 HF 仓库 (默认: `mlx-community/whisper-large-v3-mlx`)。**注意**：仅支持 `mlx-community/whisper` 系列模型。仅在转录模式下有效。
@@ -169,65 +171,48 @@ export LLM_MODEL="gpt-4o"
 
 ---
 
-## 7. 使用示例
+## 7. 高级用法示例
 
-### 场景：转录一个 Youtube 视频（已下载到本地）
-假设你下载了一个名为 `lecture.mp4` 的教程视频，想生成中文字幕：
-
+### 🚀 终极用法：转录 + 翻译 + 嵌入 (一条龙)
+直接将生肉视频转换为带中文字幕的成品视频：
 ```bash
-mlxvad --video lecture.mp4 --lang zh --output lecture.srt
+mlxvad --video movie.mp4 --lang en --to zh --embed
+```
+> **流程**：自动转录英文 -> 自动翻译为中文 -> 自动嵌入中文字幕 -> 生成 `movie_embedded.mp4` -> 清理临时字幕文件。
+
+### 场景：仅转录并嵌入 (无需翻译)
+适用于同语言字幕生成：
+```bash
+mlxvad --video lecture.mp4 --embed
 ```
 
-### 场景：快速转录（使用更小的模型）
-如果你对精度要求不高，但追求速度，可以使用 `tiny` 模型：
-
+### 场景：仅翻译现有字幕并嵌入
+如果你已经有了英文字幕 `eng.srt`，想翻译成中文并嵌入视频：
 ```bash
-mlxvad --audio meeting_record.m4a --model mlx-community/whisper-tiny-mlx --output fast_result.srt
+mlxvad --embed --video movie.mp4 --srt eng.srt --to zh
 ```
 
-### 场景：自动检测语言
-如果你不确定音频中的语言：
+### 场景：手动分步处理 (传统模式)
+如果你想保留中间文件，或者手动校对字幕后再嵌入，可以分步执行：
 
+1. **转录并翻译**：
+   ```bash
+   mlxvad --video demo.mp4 --to zh
+   # 生成 demo.original.srt 和 demo.zh.srt (保留这两个文件用于校对)
+   ```
+
+2. **(可选) 手动修改 demo.zh.srt**...
+
+3. **嵌入校对后的字幕**：
+   ```bash
+   mlxvad --embed --video demo.mp4 --srt demo.zh.srt
+   ```
+
+### 场景：去噪 + 一条龙
+对于嘈杂环境的视频：
 ```bash
-mlxvad --audio interview.wav --lang auto
+mlxvad --video vlog.mp4 --to zh --embed --denoise
 ```
-
-### 场景：转录日语视频并翻译为中文
-```bash
-mlxvad --video anime.mp4 --lang ja --to zh --output anime.srt
-```
-执行后会生成两个文件：`anime.original.srt`（原始日语字幕）和 `anime.srt`（翻译后的中文字幕）。
-
-### 场景：去噪后转录（有背景音乐的电影/电视剧）
-对于有大量 BGM 和音效的视频，使用 `--denoise` 可以显著提升转录质量：
-
-```bash
-mlxvad --video movie.mp4 --lang zh --denoise
-```
-
-处理流程：先用 MDX-NET 提取人声 → 再用 VAD 检测语音片段 → 最后用 Whisper 逐段转录。模型会自动下载到 `~/.cache/audio-separator-models/`，首次使用约需下载 100-200MB。
-
-### 场景：去噪 + 转录 + 翻译一条龙
-```bash
-mlxvad --video movie.mkv --lang en --to zh --denoise
-```
-
-### 场景：翻译已有的 SRT 字幕文件
-如果你已经有一份英文字幕，想翻译为中文：
-```bash
-mlxvad --srt english.srt --to zh
-```
-输出文件自动命名为 `english.zh.srt`。也可以用 `--output` 指定输出路径：
-```bash
-mlxvad --srt english.srt --to zh --output chinese_subtitle.srt
-```
-
-### 场景：将字幕嵌入视频
-转录并翻译完成后，将中文字幕嵌入视频（软字幕，不重新编码）：
-```bash
-mlxvad --embed --video anime.mp4 --srt anime.srt
-```
-字幕会嵌入到新文件 `anime_embedded.mp4` 中（不覆盖原视频），嵌入成功后源 SRT 文件会被自动删除。如果字幕文件名包含语言后缀（如 `anime.zh.srt`），语言标签会自动设置。
 
 ---
 

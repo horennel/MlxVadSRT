@@ -143,24 +143,26 @@ If the above variables are not configured, the program will attempt to fall back
 
 | Scenario | Command |
 | :--- | :--- |
-| **Transcribe video (Chinese)** | `mlxvad --video demo.mp4 --lang zh` |
-| **Transcribe audio (auto-detect language)** | `mlxvad --audio record.mp3 --lang auto` |
-| **Specify output filename** | `mlxvad --audio test.wav --output result.srt` |
-| **Use smaller model (faster)** | `mlxvad --audio test.wav --model mlx-community/whisper-tiny-mlx` |
-| **Transcribe and translate to Chinese** | `mlxvad --audio lecture.mp3 --lang en --to zh` |
-| **Transcribe and translate to English** | `mlxvad --video demo.mp4 --lang ja --to en` |
-| **Denoise then transcribe (with BGM)** | `mlxvad --video movie.mp4 --lang zh --denoise` |
-| **Denoise + transcribe + translate** | `mlxvad --video movie.mkv --lang en --to zh --denoise` |
-| **Translate existing subtitle file** | `mlxvad --srt subtitle.srt --to en` |
-| **Translate subtitle with custom output** | `mlxvad --srt subtitle.srt --to zh --output translated.srt` |
-| **Embed soft subtitles into video** | `mlxvad --embed --video demo.mp4 --srt demo.zh.srt` |
+| **Basic Transcription (Chinese)** | `mlxvad --video demo.mp4 --lang zh` |
+| **Transcribe Audio (Auto-detect)** | `mlxvad --audio record.mp3 --lang auto` |
+| **Transcribe + Embed (Soft Subs)** | `mlxvad --video demo.mp4 --embed` |
+| **Transcribe + Translate + Embed (One-Stop)** | `mlxvad --video demo.mp4 --to zh --embed` |
+| **Pure Translation (Existing SRT)** | `mlxvad --srt source.srt --to zh` |
+| **Pure Embed (Existing SRT)** | `mlxvad --embed --video demo.mp4 --srt source.srt` |
+| **Translate + Embed (Existing SRT)** | `mlxvad --embed --video demo.mp4 --srt source.srt --to zh` |
+| **Denoise then Transcribe (w/ BGM)** | `mlxvad --video movie.mp4 --denoise` |
+
+> **Note**: When using `--denoise`, temporary vocal files are stored in the system's temporary directory (prefixed with `mlxvadsrt_vocals_`). They are automatically cleaned up after the task. If interrupted, you can manually clear this directory.
 
 ## 6. Parameter Description
 
 - `--audio`: Input audio file path. In transcription mode, only one of `--audio`, `--video`, `--srt` can be specified.
-- `--video`: Input video file path. In transcription mode, only one of `--audio`, `--video`, `--srt` can be specified. In embed mode (`--embed`), must be used with `--srt`.
-- `--srt`: Input existing SRT subtitle file path. In translation mode, **must be used with `--to`**. In embed mode (`--embed`), must be used with `--video`.
-- `--embed`: Embed the subtitle specified by `--srt` as a soft subtitle (not hardcoded) into the video specified by `--video`. Requires both `--video` and `--srt`. Outputs to a new file (e.g., `demo_embedded.mp4`), preserving the original video. The source SRT file is automatically deleted after successful embedding. Automatically infers language tag from filename (e.g., `demo.zh.srt` → Chinese).
+- `--video`: Input video file path. In transcription mode, only one of `--audio`, `--video`, `--srt` can be specified. In embed mode (`--embed`), it is **required**.
+- `--srt`: Input existing SRT subtitle file path. In translation mode, used with `--to`. In embed mode (`--embed`), it is optional (if not provided, auto-generated from video).
+- `--embed`: Enable subtitle embedding mode. Embeds generated or specified subtitles as soft subtitles into the video.
+    - **With `--video` (no `--srt`)**: Automatically performs [Transcribe -> (Translate) -> Embed] pipeline.
+    - **With `--video` + `--srt`**: Embeds the specified subtitle (translates first if `--to` is present).
+    - **Output**: Generates a new file (e.g., `demo_embedded.mp4`), preserving the original video. Automatically deletes the intermediate SRT file after success.
 - `--lang`: Specify language (default: `auto` for auto-detection, options: `zh, en, ja, ko, auto`). Only effective in transcription mode.
 - `--to`: Translate subtitles to the specified language (default: no translation, options: `zh, en, ja, ko`). Cannot be the same as `--lang` in transcription mode.
 - `--model`: MLX model path or HF repository (default: `mlx-community/whisper-large-v3-mlx`). **Note**: Only supports `mlx-community/whisper` series models. Only effective in transcription mode.
@@ -169,65 +171,48 @@ If the above variables are not configured, the program will attempt to fall back
 
 ---
 
-## 7. Usage Examples
+## 7. Advanced Usage Examples
 
-### Scenario: Transcribe a Youtube video (downloaded locally)
-Suppose you have downloaded a tutorial video named `lecture.mp4` and want to generate Chinese subtitles:
-
+### 🚀 Ultimate Usage: Transcribe + Translate + Embed (One-Stop)
+Convert raw video directly to a finished video with subtitles:
 ```bash
-mlxvad --video lecture.mp4 --lang zh --output lecture.srt
+mlxvad --video movie.mp4 --lang en --to zh --embed
+```
+> **Workflow**: Auto-transcribe English -> Auto-translate to Chinese -> Auto-embed Chinese subtitles -> Generate `movie_embedded.mp4` -> Cleanup temporary SRT.
+
+### Scenario: Transcribe + Embed Only (No Translation)
+Useful for generating same-language subtitles:
+```bash
+mlxvad --video lecture.mp4 --embed
 ```
 
-### Scenario: Fast transcription (using a smaller model)
-If you don't need high accuracy but prioritize speed, you can use the `tiny` model:
-
+### Scenario: Translate Existing Subtitle + Embed
+If you already have English subtitles `eng.srt` and want to translate to Chinese and embed:
 ```bash
-mlxvad --audio meeting_record.m4a --model mlx-community/whisper-tiny-mlx --output fast_result.srt
+mlxvad --embed --video movie.mp4 --srt eng.srt --to zh
 ```
 
-### Scenario: Auto-detect language
-If you're unsure about the language in the audio:
+### Scenario: Manual Step-by-Step (Traditional)
+If you want to keep intermediate files or manually proofread subtitles before embedding:
 
+1. **Transcribe and Translate**:
+   ```bash
+   mlxvad --video demo.mp4 --to zh
+   # Generates demo.original.srt and demo.zh.srt (keep for proofreading)
+   ```
+
+2. **(Optional) Manually edit demo.zh.srt**...
+
+3. **Embed Proofread Subtitles**:
+   ```bash
+   mlxvad --embed --video demo.mp4 --srt demo.zh.srt
+   ```
+
+### Scenario: Denoise + One-Stop Pipeline
+For noisy videos with background music:
 ```bash
-mlxvad --audio interview.wav --lang auto
+mlxvad --video vlog.mp4 --to zh --embed --denoise
 ```
-
-### Scenario: Transcribe a Japanese video and translate to Chinese
-```bash
-mlxvad --video anime.mp4 --lang ja --to zh --output anime.srt
-```
-This will generate two files: `anime.original.srt` (original Japanese subtitles) and `anime.srt` (translated Chinese subtitles).
-
-### Scenario: Denoise then transcribe (movies/TV shows with BGM)
-For videos with heavy background music and sound effects, `--denoise` can significantly improve transcription quality:
-
-```bash
-mlxvad --video movie.mp4 --lang zh --denoise
-```
-
-Processing pipeline: MDX-NET vocal extraction → VAD speech detection → Whisper segment-by-segment transcription. The model is automatically downloaded to `~/.cache/audio-separator-models/` (~100-200MB on first use).
-
-### Scenario: Denoise + transcribe + translate (full pipeline)
-```bash
-mlxvad --video movie.mkv --lang en --to zh --denoise
-```
-
-### Scenario: Translate an existing SRT subtitle file
-If you already have an English subtitle file and want to translate it to Chinese:
-```bash
-mlxvad --srt english.srt --to zh
-```
-The output file is automatically named `english.zh.srt`. You can also use `--output` to specify the output path:
-```bash
-mlxvad --srt english.srt --to zh --output chinese_subtitle.srt
-```
-
-### Scenario: Embed subtitles into video
-After transcription and translation, embed Chinese subtitles into the video (soft subtitles, no re-encoding):
-```bash
-mlxvad --embed --video anime.mp4 --srt anime.srt
-```
-Subtitles will be embedded into a new file `anime_embedded.mp4` (original video is preserved). The source SRT file is automatically deleted after successful embedding. If the subtitle filename contains a language suffix (e.g., `anime.zh.srt`), the language tag will be set automatically.
 
 ---
 
