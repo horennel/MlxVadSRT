@@ -38,7 +38,7 @@ TRANSLATE_BATCH_SIZE = 50  # 每批翻译的字幕条数
 TRANSLATE_MAX_RETRIES = 5  # 最大重试次数
 TRANSLATE_RETRY_DELAY = 1  # 重试间隔(秒)
 TRANSLATE_API_TIMEOUT = 200  # 请求超时(秒)
-TRANSLATE_MAX_WORKERS = 4  # 翻译并发线程数
+TRANSLATE_MAX_WORKERS = 5  # 翻译并发线程数
 
 TranslateConfig = tuple[str, str, str]  # (api_key, base_url, model_name)
 

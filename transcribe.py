@@ -30,7 +30,7 @@ from denoise import extract_vocals, _cleanup_vocal_temp
 from translate import _translate_and_save
 
 
-def transcribe_with_vad(args: argparse.Namespace) -> None:
+def transcribe_with_vad(args: argparse.Namespace) -> Optional[str]:
     task_start = time.time()
     check_dependencies()
 
@@ -178,10 +178,15 @@ def transcribe_with_vad(args: argparse.Namespace) -> None:
         if args.to:
             print()
             _translate_and_save(srt_entries, args.to, args.translate_config, translated_path)
+            final_output_srt = translated_path
+        else:
+            final_output_srt = original_path
 
         elapsed = time.time() - task_start
         minutes, seconds = divmod(int(elapsed), 60)
         print(f"\n--- 任务完成 (耗时 {minutes}分{seconds}秒) ---")
+
+        return final_output_srt
 
     finally:
         _cleanup_vocal_temp(vocal_temp_path)

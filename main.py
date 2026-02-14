@@ -63,20 +63,30 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.embed:
-        if not args.video or not args.srt:
-            print("错误: --embed 需要同时指定 --video (视频文件) 和 --srt (字幕文件)。")
-            sys.exit(1)
+    # 处理纯嵌入模式：同时指定了 --embed, --video, --srt
+    # 处理纯嵌入模式：同时指定了 --embed, --video, --srt，且无需翻译
+    if args.embed and args.video and args.srt and not args.to:
         embed_subtitle(args)
         return
 
+    # 检查基本输入参数
     input_count = sum(1 for x in [args.audio, args.video, args.srt] if x)
     if input_count == 0:
         print("错误: 请指定 --audio, --video, --srt 中的一个 (或使用 --embed 模式)。")
         sys.exit(1)
-    if input_count > 1:
-        print("错误: --audio, --video, --srt 不能同时使用 (嵌入字幕请用 --embed)。")
+
+    # 允许 --embed 与视频同时候用，由后续逻辑生成 srt
+    if args.embed and not args.video:
+        print("错误: --embed 必须配合 --video 使用。")
         sys.exit(1)
+
+    if input_count > 1:
+        # 特例：允许 --embed + --video + --srt 组合（用于翻译现有字幕并嵌入）
+        is_translate_embed_combo = args.embed and args.video and args.srt and not args.audio
+
+        if not is_translate_embed_combo:
+            print("错误: --audio, --video, --srt 不能同时使用。")
+            sys.exit(1)
 
     if args.srt and not args.to:
         print("错误: 使用 --srt 时必须同时指定 --to 目标语言。")
@@ -93,10 +103,17 @@ def main() -> None:
     else:
         args.translate_config = None
 
+    final_srt_path = None
     if args.srt:
-        translate_srt_file(args)
+        final_srt_path = translate_srt_file(args)
     else:
-        transcribe_with_vad(args)
+        final_srt_path = transcribe_with_vad(args)
+
+    # 自动嵌入字幕步骤
+    if args.embed and final_srt_path and os.path.exists(final_srt_path):
+        print(f"\n--- 正在执行字幕嵌入 (SRT: {os.path.basename(final_srt_path)}) ---")
+        args.srt = final_srt_path  # 更新 srt 参数为生成的路径
+        embed_subtitle(args)
 
 
 if __name__ == "__main__":

@@ -264,7 +264,7 @@ def _translate_and_save(
     print(f"翻译完成！已保存至: {output_path}")
 
 
-def translate_srt_file(args: argparse.Namespace) -> None:
+def translate_srt_file(args: argparse.Namespace) -> Optional[str]:
     task_start = time.time()
     srt_path = os.path.abspath(args.srt)
 
@@ -291,3 +291,4 @@ def translate_srt_file(args: argparse.Namespace) -> None:
     elapsed = time.time() - task_start
     minutes, seconds = divmod(int(elapsed), 60)
     print(f"\n--- 翻译任务完成 (耗时 {minutes}分{seconds}秒) ---")
+    return translated_path
