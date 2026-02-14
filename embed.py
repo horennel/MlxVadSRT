@@ -1,0 +1,97 @@
+"""字幕嵌入模块：FFmpeg 软字幕封装"""
+
+import os
+import subprocess
+import time
+import argparse
+
+from config import FFMPEG_LANG_CODES
+from utils import check_dependencies
+
+
+def embed_subtitle(args: argparse.Namespace) -> None:
+    task_start = time.time()
+    check_dependencies()
+
+    video_path = os.path.abspath(args.video)
+    srt_path = os.path.abspath(args.srt)
+
+    if not os.path.exists(video_path):
+        print(f"错误: 找不到视频文件 {video_path}")
+        return
+    if not os.path.exists(srt_path):
+        print(f"错误: 找不到字幕文件 {srt_path}")
+        return
+
+    print("--- 字幕嵌入任务开始 ---")
+    print(f"视频文件: {os.path.basename(video_path)}")
+    print(f"字幕文件: {os.path.basename(srt_path)}")
+
+    video_ext = os.path.splitext(video_path)[1].lower()
+    if video_ext in (".mkv",):
+        sub_codec = "srt"
+    elif video_ext in (".mp4", ".m4v", ".mov"):
+        sub_codec = "mov_text"
+    else:
+        print(f"警告: {video_ext} 格式可能不支持软字幕，尝试使用 mov_text 编码...")
+        sub_codec = "mov_text"
+
+    # 从文件名推断字幕语言 (如 xxx.zh.srt → chi)
+    srt_base = os.path.splitext(os.path.basename(srt_path))[0]
+    lang_part = srt_base.rsplit(".", 1)[-1] if "." in srt_base else ""
+    ffmpeg_lang = FFMPEG_LANG_CODES.get(lang_part, "und")
+
+    base, _ = os.path.splitext(video_path)
+    temp_output = f"{base}.tmp{video_ext}"
+
+    cmd = [
+        "ffmpeg",
+        "-i", video_path,
+        "-i", srt_path,
+        "-c", "copy",
+        "-c:s", sub_codec,
+        "-map", "0:v",
+        "-map", "0:a?",
+        "-map", "1",
+        "-metadata:s:s:0", f"language={ffmpeg_lang}",
+        "-y",
+        temp_output,
+    ]
+
+    if ffmpeg_lang != "und":
+        print(f"正在嵌入字幕 (编码: {sub_codec}, 语言: {ffmpeg_lang})...")
+    else:
+        print(f"正在嵌入字幕 (编码: {sub_codec})...")
+
+    embed_ok = False
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            error_lines = result.stderr.strip().split("\n")[-5:]
+            print(f"字幕嵌入失败:\n" + "\n".join(error_lines))
+            return
+        embed_ok = True
+    except Exception as e:
+        print(f"调用 ffmpeg 失败: {e}")
+        return
+    finally:
+        if not embed_ok and os.path.exists(temp_output):
+            os.remove(temp_output)
+
+    base_name, ext = os.path.splitext(video_path)
+    final_output = f"{base_name}_embedded{ext}"
+
+    try:
+        os.replace(temp_output, final_output)
+        print(f"字幕已嵌入至新文件: {final_output}")
+
+        if os.path.exists(srt_path):
+            os.remove(srt_path)
+            print(f"已删除源字幕文件: {srt_path}")
+    except OSError as e:
+        print(f"重命名文件失败: {e}")
+        print(f"带字幕的视频已保存至: {temp_output}")
+
+    elapsed = time.time() - task_start
+    minutes, seconds = divmod(int(elapsed), 60)
+    print(f"\n--- 嵌入任务完成 (耗时 {minutes}分{seconds}秒) ---")
