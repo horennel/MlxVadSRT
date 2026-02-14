@@ -34,7 +34,6 @@ def extract_vocals(input_file: str) -> Optional[str]:
 
     try:
         print(f"正在加载人声提取模型: {DENOISE_MODEL}")
-        print("(首次运行会自动下载模型，约 100-200MB)")
 
         separator = Separator(
             log_level=logging.WARNING,

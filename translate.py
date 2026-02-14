@@ -5,9 +5,11 @@ import sys
 import json
 import math
 import time
+import threading
 import urllib.request
 import urllib.error
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 from config import (
@@ -16,6 +18,7 @@ from config import (
     TRANSLATE_MAX_RETRIES,
     TRANSLATE_RETRY_DELAY,
     TRANSLATE_API_TIMEOUT,
+    TRANSLATE_MAX_WORKERS,
     TranslateConfig,
 )
 from utils import _save_srt, _parse_srt_file
@@ -123,6 +126,61 @@ def _pad_or_truncate(translated: list[str], batch: list[str]) -> list[str]:
     return translated[:len(batch)]
 
 
+def _translate_single_batch(
+        batch_num: int,
+        total_batches: int,
+        batch: list[str],
+        target_lang: str,
+        api_key: str,
+        base_url: str,
+        model: str,
+        progress_lock: threading.Lock,
+        progress_counter: list[int],
+) -> list[str]:
+    """翻译单个批次（含重试），供线程池调用"""
+    translated = batch
+    success = False
+
+    for attempt in range(TRANSLATE_MAX_RETRIES):
+        try:
+            result = translate_batch(batch, target_lang, api_key, base_url, model)
+            translated = result
+
+            if len(translated) == len(batch):
+                success = True
+                break
+
+            print(
+                f"警告: 第 {batch_num} 批翻译返回数量不匹配 "
+                f"(期望 {len(batch)}, 得到 {len(translated)}) "
+                f"(尝试 {attempt + 1}/{TRANSLATE_MAX_RETRIES})"
+            )
+        except Exception as e:
+            print(
+                f"翻译第 {batch_num} 批请求出错 "
+                f"(尝试 {attempt + 1}/{TRANSLATE_MAX_RETRIES}): {e}"
+            )
+
+        if attempt < TRANSLATE_MAX_RETRIES - 1:
+            time.sleep(TRANSLATE_RETRY_DELAY)
+
+    if not success:
+        if len(translated) != len(batch):
+            print(
+                f"警告: 第 {batch_num} 批最终数量不匹配 "
+                f"(期望 {len(batch)}, 得到 {len(translated)}), 差异部分保留原文"
+            )
+            translated = _pad_or_truncate(translated, batch)
+        else:
+            print(f"警告: 第 {batch_num} 批翻译全部失败，保留原文")
+
+    with progress_lock:
+        progress_counter[0] += 1
+        print(f"翻译进度: {progress_counter[0]}/{total_batches} 批完成")
+
+    return translated
+
+
 def translate_srt_entries(
         srt_entries: list[str],
         target_lang: str,
@@ -137,51 +195,51 @@ def translate_srt_entries(
         headers.append("\n".join(parts[:2]))
         texts.append(parts[2] if len(parts) > 2 else "")
 
-    translated_texts: list[str] = []
     total_batches = math.ceil(len(texts) / TRANSLATE_BATCH_SIZE)
+    workers = min(TRANSLATE_MAX_WORKERS, total_batches)
 
-    for batch_idx in range(0, len(texts), TRANSLATE_BATCH_SIZE):
-        batch = texts[batch_idx: batch_idx + TRANSLATE_BATCH_SIZE]
-        batch_num = batch_idx // TRANSLATE_BATCH_SIZE + 1
-        print(f"翻译进度: {batch_num}/{total_batches} 批...")
+    print(f"共 {total_batches} 批，使用 {workers} 个线程并发翻译...")
 
-        translated = batch
-        success = False
+    # 按批次索引收集结果，保证顺序
+    batch_results: dict[int, list[str]] = {}
+    progress_lock = threading.Lock()
+    progress_counter = [0]  # 用 list 包裹以便线程内修改
 
-        for attempt in range(TRANSLATE_MAX_RETRIES):
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {}
+        for batch_idx in range(0, len(texts), TRANSLATE_BATCH_SIZE):
+            batch = texts[batch_idx: batch_idx + TRANSLATE_BATCH_SIZE]
+            batch_num = batch_idx // TRANSLATE_BATCH_SIZE + 1
+
+            future = executor.submit(
+                _translate_single_batch,
+                batch_num,
+                total_batches,
+                batch,
+                target_lang,
+                api_key,
+                base_url,
+                model,
+                progress_lock,
+                progress_counter,
+            )
+            futures[future] = batch_num
+
+        for future in as_completed(futures):
+            batch_num = futures[future]
             try:
-                result = translate_batch(batch, target_lang, api_key, base_url, model)
-                translated = result
-
-                if len(translated) == len(batch):
-                    success = True
-                    break
-
-                print(
-                    f"警告: 翻译返回数量不匹配 "
-                    f"(期望 {len(batch)}, 得到 {len(translated)}) "
-                    f"(尝试 {attempt + 1}/{TRANSLATE_MAX_RETRIES})"
-                )
+                batch_results[batch_num] = future.result()
             except Exception as e:
-                print(
-                    f"翻译第 {batch_num} 批请求出错 "
-                    f"(尝试 {attempt + 1}/{TRANSLATE_MAX_RETRIES}): {e}"
-                )
+                # 兜底：线程内未捕获的异常，保留原文
+                start = (batch_num - 1) * TRANSLATE_BATCH_SIZE
+                end = start + TRANSLATE_BATCH_SIZE
+                batch_results[batch_num] = texts[start:end]
+                print(f"错误: 第 {batch_num} 批翻译线程异常: {e}，保留原文")
 
-            if attempt < TRANSLATE_MAX_RETRIES - 1:
-                time.sleep(TRANSLATE_RETRY_DELAY)
-
-        if not success:
-            if len(translated) != len(batch):
-                print(
-                    f"警告: 第 {batch_num} 批最终数量不匹配 "
-                    f"(期望 {len(batch)}, 得到 {len(translated)}), 差异部分保留原文"
-                )
-                translated = _pad_or_truncate(translated, batch)
-            else:
-                print(f"警告: 第 {batch_num} 批翻译全部失败，保留原文")
-
-        translated_texts.extend(translated)
+    # 按顺序合并结果
+    translated_texts: list[str] = []
+    for i in range(1, total_batches + 1):
+        translated_texts.extend(batch_results[i])
 
     return [
         f"{header}\n{text}" for header, text in zip(headers, translated_texts)
