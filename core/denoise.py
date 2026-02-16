@@ -8,7 +8,7 @@ import gc
 import time
 from typing import Optional
 
-from config import DENOISE_MODEL, DENOISE_MODEL_DIR
+from .config import DENOISE_MODEL, DENOISE_MODEL_DIR
 
 
 def _cleanup_vocal_temp(vocal_temp_path: Optional[str]) -> None:

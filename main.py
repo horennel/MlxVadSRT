@@ -1,17 +1,12 @@
 """MlxVadSRT — 使用 MLX Whisper + VAD 加速转录音频/视频为 SRT 字幕"""
 
 import os
-
-if "HF_ENDPOINT" not in os.environ:
-    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-# os.environ["HF_HUB_OFFLINE"] = "1"
-
 import sys
 import argparse
 
-from transcribe import transcribe_with_vad
-from translate import get_translate_config, check_translate_api, translate_srt_file
-from embed import embed_subtitle
+from core.transcribe import transcribe_with_vad
+from core.translate import get_translate_config, check_translate_api, translate_srt_file
+from core.embed import embed_subtitle
 
 
 def main() -> None:
@@ -113,7 +108,7 @@ def main() -> None:
     if args.embed and final_srt_path and os.path.exists(final_srt_path):
         print(f"\n--- 正在执行字幕嵌入 (SRT: {os.path.basename(final_srt_path)}) ---")
         args.srt = final_srt_path  # 更新 srt 参数为生成的路径
-        embed_subtitle(args)
+        embed_subtitle(args, auto_generated_srt=True)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
-from config import (
+from .config import (
     LANG_NAMES,
     TRANSLATE_BATCH_SIZE,
     TRANSLATE_MAX_RETRIES,
@@ -21,7 +21,7 @@ from config import (
     TRANSLATE_MAX_WORKERS,
     TranslateConfig,
 )
-from utils import _save_srt, _parse_srt_file
+from .utils import _save_srt, _parse_srt_file
 
 
 def get_translate_config() -> TranslateConfig:

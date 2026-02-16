@@ -9,7 +9,7 @@ import torch
 import mlx_whisper
 from typing import Optional
 
-from config import (
+from .config import (
     SAMPLE_RATE,
     VAD_THRESHOLD,
     VAD_THRESHOLD_DENOISE,
@@ -18,7 +18,7 @@ from config import (
     VAD_SPEECH_PAD_MS,
     PROGRESS_INTERVAL,
 )
-from utils import (
+from .utils import (
     check_dependencies,
     is_audio_file,
     is_video_file,
@@ -26,8 +26,8 @@ from utils import (
     format_timestamp,
     _save_srt,
 )
-from denoise import extract_vocals, _cleanup_vocal_temp
-from translate import _translate_and_save
+from .denoise import extract_vocals, _cleanup_vocal_temp
+from .translate import _translate_and_save
 
 
 def transcribe_with_vad(args: argparse.Namespace) -> Optional[str]:

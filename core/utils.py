@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from typing import Optional
 
-from config import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, SAMPLE_RATE
+from .config import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, SAMPLE_RATE
 
 
 def check_dependencies() -> None:

@@ -5,11 +5,18 @@ import subprocess
 import time
 import argparse
 
-from config import FFMPEG_LANG_CODES
-from utils import check_dependencies
+from .config import FFMPEG_LANG_CODES
+from .utils import check_dependencies
 
 
-def embed_subtitle(args: argparse.Namespace) -> None:
+def embed_subtitle(args: argparse.Namespace, auto_generated_srt: bool = False) -> None:
+    """嵌入字幕到视频文件。
+
+    Args:
+        args: 包含 video, srt 等参数的命名空间
+        auto_generated_srt: 若为 True 表示 SRT 由程序自动生成，嵌入后自动删除；
+                            若为 False（默认）表示用户提供的文件，不删除。
+    """
     task_start = time.time()
     check_dependencies()
 
@@ -85,9 +92,10 @@ def embed_subtitle(args: argparse.Namespace) -> None:
         os.replace(temp_output, final_output)
         print(f"字幕已嵌入至新文件: {final_output}")
 
-        if os.path.exists(srt_path):
+        # 仅删除程序自动生成的 SRT 文件，用户提供的文件不删除
+        if auto_generated_srt and os.path.exists(srt_path):
             os.remove(srt_path)
-            print(f"已删除源字幕文件: {srt_path}")
+            print(f"已删除自动生成的字幕文件: {srt_path}")
     except OSError as e:
         print(f"重命名文件失败: {e}")
         print(f"带字幕的视频已保存至: {temp_output}")

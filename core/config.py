@@ -2,6 +2,10 @@
 
 import os
 
+# HuggingFace 镜像配置（统一入口，避免多处重复）
+if "HF_ENDPOINT" not in os.environ:
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
 AUDIO_EXTENSIONS = {
     ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".wma", ".aiff", ".aif"
 }
