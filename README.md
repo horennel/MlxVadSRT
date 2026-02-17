@@ -103,6 +103,8 @@ pip install -r requirements.txt
 
 本项目提供了易用的图形界面，无需记忆复杂的命令行参数。
 
+![MlxVadSRT GUI](assets/screenshot.jpg)
+
 1.  **直接启动**：
     ```bash
     python gui_main.py
