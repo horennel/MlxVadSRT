@@ -12,6 +12,7 @@ from typing import Optional
 import customtkinter as ctk
 
 from core.config import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS
+from core.utils import DependencyError
 
 # 语言选项：显示名 → 代码
 LANG_OPTIONS = {
@@ -487,6 +488,8 @@ class App(ctk.CTk):
             pass
         except KeyboardInterrupt:
             self._log("\n⚠️ 任务被中断。")
+        except DependencyError as e:
+            self._log(f"\n❌ 环境依赖错误: {e}")
         except Exception as e:
             if self.cancel_event.is_set():
                 self._log("\n⚠️ 任务已取消。")
@@ -532,8 +535,8 @@ class App(ctk.CTk):
             print("❌ 错误: 选择了 SRT 文件时必须指定翻译目标语言。")
             return
 
-        if args.embed and not args.video and not args.srt:
-            print("❌ 错误: 嵌入字幕需要视频文件。")
+        if args.embed and not args.video:
+            print("❌ 错误: 嵌入字幕需要视频文件 (--embed 必须配合视频使用)。")
             return
 
         if not args.srt and args.to and args.to == args.lang:
