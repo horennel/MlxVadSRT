@@ -7,6 +7,7 @@ import argparse
 from core.transcribe import transcribe_with_vad
 from core.translate import get_translate_config, check_translate_api, translate_srt_file
 from core.embed import embed_subtitle
+from core.utils import DependencyError
 
 
 def main() -> None:
@@ -58,10 +59,12 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # 处理纯嵌入模式：同时指定了 --embed, --video, --srt
-    # 处理纯嵌入模式：同时指定了 --embed, --video, --srt，且无需翻译
     if args.embed and args.video and args.srt and not args.to:
-        embed_subtitle(args)
+        try:
+            embed_subtitle(args)
+        except DependencyError as e:
+            print(f"\n❌ 环境依赖错误: {e}")
+            sys.exit(1)
         return
 
     # 检查基本输入参数
@@ -70,7 +73,7 @@ def main() -> None:
         print("错误: 请指定 --audio, --video, --srt 中的一个 (或使用 --embed 模式)。")
         sys.exit(1)
 
-    # 允许 --embed 与视频同时候用，由后续逻辑生成 srt
+    # 允许 --embed 与视频同时使用，由后续逻辑生成 srt
     if args.embed and not args.video:
         print("错误: --embed 必须配合 --video 使用。")
         sys.exit(1)
@@ -98,17 +101,22 @@ def main() -> None:
     else:
         args.translate_config = None
 
-    final_srt_path = None
-    if args.srt:
-        final_srt_path = translate_srt_file(args)
-    else:
-        final_srt_path = transcribe_with_vad(args)
+    try:
+        final_srt_path = None
+        if args.srt:
+            final_srt_path = translate_srt_file(args)
+        else:
+            final_srt_path = transcribe_with_vad(args)
 
-    # 自动嵌入字幕步骤
-    if args.embed and final_srt_path and os.path.exists(final_srt_path):
-        print(f"\n--- 正在执行字幕嵌入 (SRT: {os.path.basename(final_srt_path)}) ---")
-        args.srt = final_srt_path  # 更新 srt 参数为生成的路径
-        embed_subtitle(args, auto_generated_srt=True)
+        # 自动嵌入字幕步骤
+        if args.embed and final_srt_path and os.path.exists(final_srt_path):
+            print(f"\n--- 正在执行字幕嵌入 (SRT: {os.path.basename(final_srt_path)}) ---")
+            args.srt = final_srt_path  # 更新 srt 参数为生成的路径
+            embed_subtitle(args, auto_generated_srt=True)
+            
+    except DependencyError as e:
+        print(f"\n❌ 环境依赖错误: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
