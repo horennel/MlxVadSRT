@@ -84,31 +84,36 @@ Set up an alias in your terminal configuration file to directly call the Python 
     source ~/.zshrc
     ```
 
-### Method 2: PyInstaller
+### Method 2: GUI Application (Recommended)
 
-Package the script and its dependencies into a standalone binary file.
+This project provides an easy-to-use graphical interface, eliminating the need to memorize complex command-line arguments.
 
-> [!NOTE]
-> **Note**: Due to the need to include large deep learning libraries like `torch` and `mlx`, the generated binary file will be quite large (typically over 1GB). The packaging process will also consume considerable memory and time.
-
-1.  **Install packaging tool**:
+1.  **Direct Launch**:
     ```bash
-    pip install pyinstaller
+    python gui_main.py
     ```
 
-2.  **Execute packaging**:
+2.  **Package as macOS App (py2app)**:
+    
+    You can package the project into a standard `.app` application that runs with a double-click.
+
+    **Install py2app**:
     ```bash
-    pyinstaller --onefile \
-                --name mlxvad \
-                --collect-all mlx_whisper \
-                --collect-all torch \
-                main.py
+    pip install py2app
     ```
 
-3.  **Move to system path** (optional):
+    **Development Build (Alias - Recommended)**:
+    The generated App is just a symlink bundle. It is small, and code changes take effect immediately without repacking.
     ```bash
-    sudo cp dist/mlxvad /usr/local/bin/
+    python setup.py py2app -A
     ```
+    Launch: Find `MlxVadSRT.app` in the `dist` directory and double-click to run.
+
+    **Add to Applications Folder**:
+    You can drag `dist/MlxVadSRT.app` into your `/Applications` folder.
+    This allows you to launch it via Launchpad or Spotlight anytime.
+
+    > **Note**: Since Alias mode (`-A`) is used, the generated App is just a wrapper around your environment. **Please do not delete or move the project source folder**, otherwise the App will stop working.
 
 ---
 

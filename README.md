@@ -84,31 +84,35 @@ pip install "audio-separator[cpu]"
     source ~/.zshrc
     ```
 
-### 方式二：PyInstaller
+### 方式二：GUI 图形界面 (推荐)
 
-将脚本及其依赖打包成一个独立的二进制文件。
+本项目提供了易用的图形界面，无需记忆复杂的命令行参数。
 
-> [!NOTE]
-> **注意**：由于需要包含 `torch` 和 `mlx` 等大型深度学习库，生成的二进制文件体积会比较大（通常在 1GB 以上）。打包过程也会占用较多内存和时间。
-
-1.  **安装打包工具**：
+1.  **直接启动**：
     ```bash
-    pip install pyinstaller
+    python gui_main.py
     ```
 
-2.  **执行打包**：
+2.  **打包为 macOS App (py2app)**：
+    
+    您可以将项目打包为标准的 `.app` 应用程序，双击即可运行。
+
+    **安装 py2app**:
     ```bash
-    pyinstaller --onefile \
-                --name mlxvad \
-                --collect-all mlx_whisper \
-                --collect-all torch \
-                main.py
+    pip install py2app
     ```
 
-3.  **移动到系统路径**（可选）：
+    **开发模式打包 (Alias - 推荐)**：
+    生成的 App 只是一个软链接，体积小，修改代码后无需重新打包，立即生效。
     ```bash
-    sudo cp dist/mlxvad /usr/local/bin/
-    ```
+    python setup.py py2app -A
+    启动：在 `dist` 目录中找到 `MlxVadSRT.app` 双击运行。
+
+    **添加到应用程序文件夹**：
+    您可以将 `dist/MlxVadSRT.app` 拖入 `/Applications` (应用程序) 文件夹。
+    这样您就可以通过 Launchpad (启动台) 或 Spotlight 随时启动它了。
+
+    > **注意**：由于使用 Alias 模式 (`-A`)，生成的 App 只是一个包裹了环境路径的“传送门”。**请不要删除或移动本项目源代码文件夹**，否则 App 将无法运行。
 
 ---
 
