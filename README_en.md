@@ -103,6 +103,8 @@ Set up an alias in your terminal configuration file to directly call the Python 
 
 This project provides an easy-to-use graphical interface, eliminating the need to memorize complex command-line arguments.
 
+![MlxVadSRT GUI](assets/screenshot.jpg)
+
 1.  **Direct Launch**:
     ```bash
     python gui_main.py
