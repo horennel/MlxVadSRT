@@ -6,7 +6,7 @@ import time
 import argparse
 
 from .config import FFMPEG_LANG_CODES
-from .utils import check_dependencies
+from .utils import check_dependencies, format_elapsed
 
 
 def embed_subtitle(args: argparse.Namespace, auto_generated_srt: bool = False) -> None:
@@ -72,7 +72,7 @@ def embed_subtitle(args: argparse.Namespace, auto_generated_srt: bool = False) -
         video_path
     ]
     try:
-        result = subprocess.run(probe_cmd, capture_output=True, text=True)
+        result = subprocess.run(probe_cmd, capture_output=True, text=True, encoding="utf-8")
         # 统计输出行数即为流数量
         existing_sub_count = len(result.stdout.strip().splitlines())
     except Exception:
@@ -101,7 +101,7 @@ def embed_subtitle(args: argparse.Namespace, auto_generated_srt: bool = False) -
 
     embed_ok = False
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
         if result.returncode != 0:
             error_lines = result.stderr.strip().split("\n")[-5:]
             print(f"字幕嵌入失败:\n" + "\n".join(error_lines))
@@ -130,5 +130,4 @@ def embed_subtitle(args: argparse.Namespace, auto_generated_srt: bool = False) -
         print(f"带字幕的视频已保存至: {temp_output}")
 
     elapsed = time.time() - task_start
-    minutes, seconds = divmod(int(elapsed), 60)
-    print(f"\n--- 嵌入任务完成 (耗时 {minutes}分{seconds}秒) ---")
+    print(f"\n--- 嵌入任务完成 (耗时 {format_elapsed(elapsed)}) ---")

@@ -61,6 +61,14 @@ def format_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{mins:02d}:{secs:02d},{millis:03d}"
 
 
+def format_elapsed(elapsed: float) -> str:
+    """格式化耗时显示：短时间显示秒数（含小数），长时间显示分秒"""
+    if elapsed < 60:
+        return f"{elapsed:.1f}秒"
+    minutes, seconds = divmod(int(elapsed), 60)
+    return f"{minutes}分{seconds}秒"
+
+
 def _save_srt(srt_entries: list[str], output_path: str) -> None:
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:

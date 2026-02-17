@@ -21,7 +21,7 @@ from .config import (
     TRANSLATE_MAX_WORKERS,
     TranslateConfig,
 )
-from .utils import _save_srt, _parse_srt_file
+from .utils import _save_srt, _parse_srt_file, format_elapsed
 
 
 def get_translate_config() -> TranslateConfig:
@@ -289,6 +289,5 @@ def translate_srt_file(args: argparse.Namespace) -> Optional[str]:
     _translate_and_save(srt_entries, args.to, args.translate_config, translated_path)
 
     elapsed = time.time() - task_start
-    minutes, seconds = divmod(int(elapsed), 60)
-    print(f"\n--- 翻译任务完成 (耗时 {minutes}分{seconds}秒) ---")
+    print(f"\n--- 翻译任务完成 (耗时 {format_elapsed(elapsed)}) ---")
     return translated_path
