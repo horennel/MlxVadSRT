@@ -276,7 +276,7 @@ def translate_srt_file(args: argparse.Namespace) -> Optional[str]:
 
     srt_entries = _parse_srt_file(srt_path)
     if srt_entries is None:
-        return
+        return None
 
     print(f"读取到 {len(srt_entries)} 条字幕。")
 

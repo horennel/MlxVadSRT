@@ -43,13 +43,41 @@ def embed_subtitle(args: argparse.Namespace, auto_generated_srt: bool = False) -
         print(f"警告: {video_ext} 格式可能不支持软字幕，尝试使用 mov_text 编码...")
         sub_codec = "mov_text"
 
-    # 从文件名推断字幕语言 (如 xxx.zh.srt → chi)
-    srt_base = os.path.splitext(os.path.basename(srt_path))[0]
-    lang_part = srt_base.rsplit(".", 1)[-1] if "." in srt_base else ""
-    ffmpeg_lang = FFMPEG_LANG_CODES.get(lang_part, "und")
+    # 确定字幕语言元数据
+    # 优先级: 1. 翻译目标语言 (--to) 2. 源语言 (--lang, 非 auto) 3. 文件名推断
+    lang_code = None
+    if getattr(args, "to", None):
+        lang_code = args.to
+    elif getattr(args, "lang", None) and args.lang != "auto":
+        lang_code = args.lang
+    
+    if not lang_code:
+        # 从文件名推断 (如 xxx.zh.srt → zh)
+        srt_base = os.path.splitext(os.path.basename(srt_path))[0]
+        if "." in srt_base:
+            lang_code = srt_base.rsplit(".", 1)[-1]
+
+    ffmpeg_lang = FFMPEG_LANG_CODES.get(lang_code, "und")
 
     base, _ = os.path.splitext(video_path)
     temp_output = f"{base}.tmp{video_ext}"
+
+    # 使用 ffprobe 精确探测原视频中已有的字幕轨数量
+    probe_cmd = [
+        "ffprobe", 
+        "-v", "error", 
+        "-select_streams", "s", 
+        "-show_entries", "stream=index", 
+        "-of", "csv=p=0", 
+        video_path
+    ]
+    try:
+        result = subprocess.run(probe_cmd, capture_output=True, text=True)
+        # 统计输出行数即为流数量
+        existing_sub_count = len(result.stdout.strip().splitlines())
+    except Exception:
+        # Fallback: 如果 ffprobe 失败，假设为 0 (或者可以尝试解析 ffmpeg 输出，但风险较大)
+        existing_sub_count = 0
 
     cmd = [
         "ffmpeg",
@@ -59,8 +87,9 @@ def embed_subtitle(args: argparse.Namespace, auto_generated_srt: bool = False) -
         "-c:s", sub_codec,
         "-map", "0:v",
         "-map", "0:a?",
+        "-map", "0:s?",
         "-map", "1",
-        "-metadata:s:s:0", f"language={ffmpeg_lang}",
+        f"-metadata:s:s:{existing_sub_count}", f"language={ffmpeg_lang}",
         "-y",
         temp_output,
     ]

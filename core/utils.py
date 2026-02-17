@@ -11,11 +11,15 @@ from typing import Optional
 from .config import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, SAMPLE_RATE
 
 
+class DependencyError(Exception):
+    pass
+
+
 def check_dependencies() -> None:
     if not shutil.which("ffmpeg"):
-        print("错误: 在系统 PATH 中找不到 'ffmpeg'。")
-        print("请先安装 ffmpeg (例如: brew install ffmpeg)")
-        sys.exit(1)
+        raise DependencyError("在系统 PATH 中找不到 'ffmpeg'。请先安装: brew install ffmpeg")
+    if not shutil.which("ffprobe"):
+        raise DependencyError("在系统 PATH 中找不到 'ffprobe'。请确保安装了完整的 ffmpeg 工具包。")
 
 
 def is_audio_file(file_path: str) -> bool:
