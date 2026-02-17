@@ -12,7 +12,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
-from config import (
+from .config import (
     LANG_NAMES,
     TRANSLATE_BATCH_SIZE,
     TRANSLATE_MAX_RETRIES,
@@ -21,7 +21,7 @@ from config import (
     TRANSLATE_MAX_WORKERS,
     TranslateConfig,
 )
-from utils import _save_srt, _parse_srt_file
+from .utils import _save_srt, _parse_srt_file, format_elapsed
 
 
 def get_translate_config() -> TranslateConfig:
@@ -276,7 +276,7 @@ def translate_srt_file(args: argparse.Namespace) -> Optional[str]:
 
     srt_entries = _parse_srt_file(srt_path)
     if srt_entries is None:
-        return
+        return None
 
     print(f"读取到 {len(srt_entries)} 条字幕。")
 
@@ -289,6 +289,5 @@ def translate_srt_file(args: argparse.Namespace) -> Optional[str]:
     _translate_and_save(srt_entries, args.to, args.translate_config, translated_path)
 
     elapsed = time.time() - task_start
-    minutes, seconds = divmod(int(elapsed), 60)
-    print(f"\n--- 翻译任务完成 (耗时 {minutes}分{seconds}秒) ---")
+    print(f"\n--- 翻译任务完成 (耗时 {format_elapsed(elapsed)}) ---")
     return translated_path

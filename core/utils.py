@@ -8,14 +8,18 @@ import numpy as np
 import torch
 from typing import Optional
 
-from config import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, SAMPLE_RATE
+from .config import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, SAMPLE_RATE
+
+
+class DependencyError(Exception):
+    pass
 
 
 def check_dependencies() -> None:
     if not shutil.which("ffmpeg"):
-        print("错误: 在系统 PATH 中找不到 'ffmpeg'。")
-        print("请先安装 ffmpeg (例如: brew install ffmpeg)")
-        sys.exit(1)
+        raise DependencyError("在系统 PATH 中找不到 'ffmpeg'。请先安装: brew install ffmpeg")
+    if not shutil.which("ffprobe"):
+        raise DependencyError("在系统 PATH 中找不到 'ffprobe'。请确保安装了完整的 ffmpeg 工具包。")
 
 
 def is_audio_file(file_path: str) -> bool:
@@ -55,6 +59,14 @@ def format_timestamp(seconds: float) -> str:
     mins, secs = divmod(total_seconds, 60)
     hours, mins = divmod(mins, 60)
     return f"{hours:02d}:{mins:02d}:{secs:02d},{millis:03d}"
+
+
+def format_elapsed(elapsed: float) -> str:
+    """格式化耗时显示：短时间显示秒数（含小数），长时间显示分秒"""
+    if elapsed < 60:
+        return f"{elapsed:.1f}秒"
+    minutes, seconds = divmod(int(elapsed), 60)
+    return f"{minutes}分{seconds}秒"
 
 
 def _save_srt(srt_entries: list[str], output_path: str) -> None:

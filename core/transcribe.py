@@ -9,7 +9,7 @@ import torch
 import mlx_whisper
 from typing import Optional
 
-from config import (
+from .config import (
     SAMPLE_RATE,
     VAD_THRESHOLD,
     VAD_THRESHOLD_DENOISE,
@@ -18,16 +18,17 @@ from config import (
     VAD_SPEECH_PAD_MS,
     PROGRESS_INTERVAL,
 )
-from utils import (
+from .utils import (
     check_dependencies,
     is_audio_file,
     is_video_file,
     load_audio_with_ffmpeg,
     format_timestamp,
+    format_elapsed,
     _save_srt,
 )
-from denoise import extract_vocals, _cleanup_vocal_temp
-from translate import _translate_and_save
+from .denoise import extract_vocals, _cleanup_vocal_temp
+from .translate import _translate_and_save
 
 
 def transcribe_with_vad(args: argparse.Namespace) -> Optional[str]:
@@ -37,7 +38,7 @@ def transcribe_with_vad(args: argparse.Namespace) -> Optional[str]:
     input_file = args.audio or args.video
     if not os.path.exists(input_file):
         print(f"错误: 找不到文件 {input_file}")
-        return
+        return None
 
     if args.video and not is_video_file(input_file):
         print(f"警告: {input_file} 看起来不像是视频文件，继续尝试...")
@@ -81,7 +82,7 @@ def transcribe_with_vad(args: argparse.Namespace) -> Optional[str]:
             wav = load_audio_with_ffmpeg(audio_source, SAMPLE_RATE)
             if wav is None:
                 print("读取音频失败，请检查文件权限或 ffmpeg 是否可用")
-                return
+                return None
 
             vad_threshold = VAD_THRESHOLD_DENOISE if (args.denoise and vocal_temp_path) else VAD_THRESHOLD
             print(
@@ -100,7 +101,7 @@ def transcribe_with_vad(args: argparse.Namespace) -> Optional[str]:
 
             if not speech_timestamps:
                 print("未检测到任何有效人声片段。")
-                return
+                return None
 
             lang_display = "自动检测" if args.lang == "auto" else args.lang
             print(f"检测到 {len(speech_timestamps)} 段人声区域，开始转录 (语言: {lang_display})...")
@@ -149,7 +150,7 @@ def transcribe_with_vad(args: argparse.Namespace) -> Optional[str]:
 
         if not srt_entries:
             print("\n未生成任何字幕内容。")
-            return
+            return None
 
         if args.output:
             output_path = os.path.abspath(args.output)
@@ -183,8 +184,7 @@ def transcribe_with_vad(args: argparse.Namespace) -> Optional[str]:
             final_output_srt = original_path
 
         elapsed = time.time() - task_start
-        minutes, seconds = divmod(int(elapsed), 60)
-        print(f"\n--- 任务完成 (耗时 {minutes}分{seconds}秒) ---")
+        print(f"\n--- 任务完成 (耗时 {format_elapsed(elapsed)}) ---")
 
         return final_output_srt
 

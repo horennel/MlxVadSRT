@@ -3,7 +3,7 @@
 [English Documentation](README_en.md)
 
 > [!CAUTION]
-> **警告**：本项目仅支持 **macOS (Apple Silicon)** 环境（如 M1, M2, M3 芯片）。`mlx-whisper` 依赖 Apple 芯片的硬件加速，无法在 Intel Mac、Windows 或 Linux 上运行。
+> **警告**：本项目仅支持 **macOS (Apple Silicon)** 环境（如 M1, M2, M3, M4 芯片）。`mlx-whisper` 依赖 Apple 芯片的硬件加速，无法在 Intel Mac、Windows 或 Linux 上运行。
 
 `MlxVadSRT` 是一个基于 MLX Whisper 和 Silero VAD 的高性能语音转文字工具，专为 macOS (Apple Silicon) 优化。它支持自动提取视频音频、人声检测（VAD）以及生成标准 SRT 字幕文件。
 
@@ -12,21 +12,32 @@
 -   **MLX 硬件加速**：利用 Apple Silicon 的统一内存架构和 Metal 加速，`mlx-whisper` 不仅速度远超普通 CPU 推理，更能媲美 `whisper.cpp`，兼顾高性能与 Python 生态的易用性。
 -   **VAD 智能过滤**：通过 `Silero VAD` 预先检测并仅提取人声片段，不仅能跳过静音区域大幅提升效率，更能有效避免 Whisper 在静音片段产生幻觉（Hallucination），显著提升转录准确度。
 -   **人声提取 (去噪)**：可选使用 MDX-NET 模型提取人声，去除背景音乐和音效，进一步提升嘈杂音频的转录质量。
--   **字幕翻译**：支持将转录后的字幕翻译为指定语言，使用 OpenAI 兼容 API，支持自动回退到本地 Ollama。
+-   **字幕翻译**：支持将转录后的字幕翻译为指定语言，使用 OpenAI 兼容 API，支持多线程并发翻译，并可自动回退到本地 Ollama。
 -   **独立翻译模式**：支持直接翻译已有的 SRT 字幕文件，无需重新转录。
 -   **软字幕嵌入**：支持将 SRT 字幕作为软字幕（非硬编码）嵌入视频文件，使用 ffmpeg 封装，不重新编码视频。输出到新文件，不覆盖原视频。
+-   **GUI 图形界面**：提供基于 customtkinter 的原生 macOS 风格图形界面，支持任务取消、实时日志、窗口位置记忆。
 
 ## 项目结构
 
 ```
 MlxVadSRT/
-├── main.py          # 入口：命令行参数解析与主流程调度
-├── config.py        # 全局常量与配置（零依赖）
-├── utils.py         # 通用工具：音频读取、SRT 格式化/解析、文件类型检测
-├── transcribe.py    # 核心转录：VAD 分段 + Whisper 逐段转录
-├── denoise.py       # 人声提取：MDX-NET 模型去除 BGM/音效
-├── translate.py     # 翻译模块：LLM API 批量翻译字幕
-└── embed.py         # 字幕嵌入：FFmpeg 软字幕封装
+├── main.py              # CLI 入口：命令行参数解析与主流程调度
+├── gui_main.py          # GUI 入口：启动图形界面（含 PATH 同步）
+├── setup.py             # py2app 打包配置
+├── requirements.txt     # Python 依赖列表
+├── assets/
+│   └── MlxVadSRT.icns   # macOS App 图标
+├── core/                # 核心业务模块
+│   ├── __init__.py
+│   ├── config.py        # 全局常量与配置（零依赖）
+│   ├── utils.py         # 通用工具：音频读取、SRT 格式化/解析、文件类型检测
+│   ├── transcribe.py    # 核心转录：VAD 分段 + Whisper 逐段转录
+│   ├── denoise.py       # 人声提取：MDX-NET 模型去除 BGM/音效
+│   ├── translate.py     # 翻译模块：LLM API 多线程批量翻译字幕
+│   └── embed.py         # 字幕嵌入：FFmpeg 软字幕封装
+└── gui/                 # GUI 模块
+    ├── __init__.py
+    └── app.py           # customtkinter 图形界面（含任务管理和日志重定向）
 ```
 
 ## 1. 环境准备
@@ -38,7 +49,7 @@ MlxVadSRT/
     ```bash
     brew install ffmpeg
     ```
-3.  **Apple Silicon (M1/M2/M3)**: `mlx-whisper` 需要 Apple 芯片支持。
+3.  **Apple Silicon (M1/M2/M3/M4)**: `mlx-whisper` 需要 Apple 芯片支持。
 4.  **内存建议**:
     *   **16GB+ 统一内存**: 推荐使用 `mlx-community/whisper-large-v3-mlx`。
     *   **8GB 统一内存**: 推荐使用 `mlx-community/whisper-large-v3-turbo`。
@@ -54,11 +65,15 @@ python3 -m venv venv
 source venv/bin/activate
 
 # 安装核心依赖
-pip install torch numpy mlx-whisper
-
-# 可选：安装人声提取依赖 (用于 --denoise 功能)
-pip install "audio-separator[cpu]"
+pip install -r requirements.txt
 ```
+
+`requirements.txt` 包含以下依赖：
+- `mlx-whisper` — MLX Whisper 转录引擎
+- `numpy` / `torch` — 数值计算和 VAD 模型
+- `customtkinter` — GUI 图形界面
+- `audio-separator[cpu]` — 人声提取（可选）
+- `py2app` — macOS App 打包（可选）
 
 ---
 
@@ -84,31 +99,37 @@ pip install "audio-separator[cpu]"
     source ~/.zshrc
     ```
 
-### 方式二：PyInstaller
+### 方式二：GUI 图形界面 (推荐)
 
-将脚本及其依赖打包成一个独立的二进制文件。
+本项目提供了易用的图形界面，无需记忆复杂的命令行参数。
 
-> [!NOTE]
-> **注意**：由于需要包含 `torch` 和 `mlx` 等大型深度学习库，生成的二进制文件体积会比较大（通常在 1GB 以上）。打包过程也会占用较多内存和时间。
-
-1.  **安装打包工具**：
+1.  **直接启动**：
     ```bash
-    pip install pyinstaller
+    python gui_main.py
     ```
 
-2.  **执行打包**：
+2.  **打包为 macOS App (py2app)**：
+    
+    您可以将项目打包为标准的 `.app` 应用程序，双击即可运行。
+
+    **安装 py2app**:
     ```bash
-    pyinstaller --onefile \
-                --name mlxvad \
-                --collect-all mlx_whisper \
-                --collect-all torch \
-                main.py
+    pip install py2app
     ```
 
-3.  **移动到系统路径**（可选）：
+    **开发模式打包 (Alias - 推荐)**：
+    生成的 App 只是一个软链接，体积小，修改代码后无需重新打包，立即生效。
     ```bash
-    sudo cp dist/mlxvad /usr/local/bin/
+    python setup.py py2app -A
     ```
+
+    启动：在 `dist` 目录中找到 `MlxVadSRT.app` 双击运行。
+
+    **添加到应用程序文件夹**：
+    您可以将 `dist/MlxVadSRT.app` 拖入 `/Applications` (应用程序) 文件夹。
+    这样您就可以通过 Launchpad (启动台) 或 Spotlight 随时启动它了。
+
+    > **注意**：由于使用 Alias 模式 (`-A`)，生成的 App 只是一个包裹了环境路径的"传送门"。**请不要删除或移动本项目源代码文件夹**，否则 App 将无法运行。
 
 ---
 
@@ -228,10 +249,30 @@ mlxvad --video vlog.mp4 --to zh --embed --denoise
 
 ---
 
+## 9. 配置参数参考
+
+以下参数在 `core/config.py` 中定义，可按需调整：
+
+| 参数 | 默认值 | 说明 |
+|------|:---:|------|
+| `VAD_THRESHOLD` | `0.25` | 语音概率阈值，越低越敏感（最低 `0.1`） |
+| `VAD_THRESHOLD_DENOISE` | `0.35` | 去噪后使用的较高阈值（去噪后信号更干净） |
+| `VAD_MIN_SILENCE_MS` | `500` | 最短静音时长 (毫秒) |
+| `VAD_MIN_SPEECH_MS` | `50` | 最短语音时长 (毫秒) |
+| `VAD_SPEECH_PAD_MS` | `300` | 语音片段前后填充 (毫秒) |
+| `TRANSLATE_BATCH_SIZE` | `50` | 每批翻译的字幕条数 |
+| `TRANSLATE_MAX_WORKERS` | `5` | 翻译并发线程数 |
+| `TRANSLATE_MAX_RETRIES` | `5` | 翻译最大重试次数 |
+| `TRANSLATE_API_TIMEOUT` | `200` | 翻译请求超时 (秒) |
+| `DENOISE_MODEL` | `UVR-MDX-NET-Inst_HQ_3.onnx` | 人声提取使用的 MDX-NET 模型 |
+
+---
+
 ## 常见问题
 - **首次运行**: 程序会自动从 Hugging Face 下载模型，请保持网络畅通。
 - **离线使用**: 在 `main.py` 中取消 `os.environ["HF_HUB_OFFLINE"] = "1"` 的注释，可强制使用本地缓存。
-- **翻译超时**: 如果翻译 API 响应较慢，可修改 `config.py` 中的 `TRANSLATE_API_TIMEOUT` 常量（默认 200 秒）。
-- **台词遗漏**: 如果发现部分语音未被识别到，可降低 `config.py` 中的 `VAD_THRESHOLD` 值（默认 0.25，最低 0.1）。
+- **翻译超时**: 如果翻译 API 响应较慢，可修改 `core/config.py` 中的 `TRANSLATE_API_TIMEOUT` 常量（默认 200 秒）。
+- **台词遗漏**: 如果发现部分语音未被识别到，可降低 `core/config.py` 中的 `VAD_THRESHOLD` 值（默认 0.25，最低 0.1）。
+- **去噪后过度过滤**: 如果使用 `--denoise` 后反而丢失台词，可降低 `core/config.py` 中的 `VAD_THRESHOLD_DENOISE` 值（默认 0.35）。
 - **`--denoise` 报 ImportError**: 请确保安装了 `audio-separator` 库：`pip install "audio-separator[cpu]"`。
 - **`--denoise` 模型下载失败**: 模型缓存在 `~/.cache/audio-separator-models/`，可手动下载后放入该目录。

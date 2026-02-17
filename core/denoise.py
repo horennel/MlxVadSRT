@@ -8,7 +8,8 @@ import gc
 import time
 from typing import Optional
 
-from config import DENOISE_MODEL, DENOISE_MODEL_DIR
+from .config import DENOISE_MODEL, DENOISE_MODEL_DIR
+from .utils import format_elapsed
 
 
 def _cleanup_vocal_temp(vocal_temp_path: Optional[str]) -> None:
@@ -19,6 +20,14 @@ def _cleanup_vocal_temp(vocal_temp_path: Optional[str]) -> None:
 
 def extract_vocals(input_file: str) -> Optional[str]:
     """提取人声并返回 WAV 路径，处理后释放模型内存"""
+
+    # py2app 兼容: py2app 会设置 sys.frozen=True，但不设置 sys._MEIPASS
+    # (后者是 PyInstaller 专属属性)。audio-separator 内部的 pyrb.py 会在
+    # sys.frozen 为 True 时访问 sys._MEIPASS，导致 AttributeError。
+    # 预设一个合理的路径值来避免崩溃。
+    if getattr(sys, "frozen", False) and not hasattr(sys, "_MEIPASS"):
+        sys._MEIPASS = os.path.dirname(sys.executable)
+
     try:
         from audio_separator.separator import Separator
     except ImportError:
@@ -73,7 +82,7 @@ def extract_vocals(input_file: str) -> Optional[str]:
             os.remove(temp_audio_path)
 
         elapsed = time.time() - denoise_start
-        print(f"人声提取完成 (耗时 {int(elapsed)}秒)")
+        print(f"人声提取完成 (耗时 {format_elapsed(elapsed)})")
 
         if not output_files:
             print("警告: 人声提取未生成任何输出文件。")
