@@ -1,0 +1,13 @@
+# Core dependencies
+mlx-whisper
+numpy
+torch
+
+# GUI
+customtkinter
+
+# Optional: Denoise feature
+audio-separator[cpu]
+
+# Packaging
+py2app
