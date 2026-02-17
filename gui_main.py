@@ -11,6 +11,7 @@ if sys.platform == "darwin" and "PATH" in os.environ:
         user_path = subprocess.check_output(
             [user_shell, "-l", "-c", "echo $PATH"],
             text=True,
+            encoding="utf-8",
             stderr=subprocess.DEVNULL
         ).strip()
 
