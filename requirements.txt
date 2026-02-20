@@ -3,11 +3,8 @@ mlx-whisper
 numpy
 torch
 
-# GUI
-customtkinter
+# Web UI
+gradio
 
 # Optional: Denoise feature
 audio-separator[cpu]
-
-# Packaging
-py2app
