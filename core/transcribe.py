@@ -190,6 +190,8 @@ def _transcribe_segments(
 
     for i, segment in enumerate(speech_timestamps):
         start_sec = segment["start"] / SAMPLE_RATE
+        end_sec = segment["end"] / SAMPLE_RATE
+        chunk_duration = end_sec - start_sec
         audio_chunk = wav[segment["start"]:segment["end"]].numpy()
 
         if np.max(np.abs(audio_chunk)) < 1e-6:
@@ -209,8 +211,14 @@ def _transcribe_segments(
             if not text:
                 continue
 
-            s_start = start_sec + chunk_segment["start"]
-            s_end = start_sec + chunk_segment["end"]
+            # 裁剪 Whisper 幻觉时间戳到有效范围内
+            seg_start = max(0.0, chunk_segment["start"])
+            seg_end = min(chunk_segment["end"], chunk_duration)
+            if seg_start >= seg_end:
+                continue
+
+            s_start = start_sec + seg_start
+            s_end = start_sec + seg_end
 
             entry = (
                 f"{counter}\n"

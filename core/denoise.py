@@ -9,7 +9,7 @@ import time
 from typing import Optional
 
 from .config import DENOISE_MODEL, DENOISE_MODEL_DIR
-from .utils import format_elapsed
+from .utils import format_elapsed, DependencyError
 
 
 def _cleanup_vocal_temp(vocal_temp_path: Optional[str]) -> None:
@@ -31,9 +31,9 @@ def extract_vocals(input_file: str) -> Optional[str]:
     try:
         from audio_separator.separator import Separator
     except ImportError:
-        print("错误: 人声提取需要安装 audio-separator 库。")
-        print("请运行: pip install 'audio-separator[cpu]'")
-        sys.exit(1)
+        raise DependencyError(
+            "人声提取需要安装 audio-separator 库。请运行: pip install 'audio-separator[cpu]'"
+        )
 
     import logging
     import tempfile

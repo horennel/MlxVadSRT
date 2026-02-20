@@ -69,7 +69,7 @@ class _StreamCapture:
 
     def write(self, text: str) -> None:
         if self._cancel.get("is_cancelled"):
-            raise InterruptedError("任务已取消")
+            raise KeyboardInterrupt("任务已取消")
         if text:
             self._queue.put(text)
             self._original.write(text)
@@ -143,7 +143,7 @@ def process_file_stream(
         sys.stderr = _StreamCapture(old_stderr, log_queue, cancel_flag)
         try:
             result_holder["result"] = run_task(params)
-        except InterruptedError:
+        except KeyboardInterrupt:
             log_queue.put("\n⚠️ 任务已取消。\n")
         except Exception as e:
             import traceback

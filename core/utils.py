@@ -81,7 +81,7 @@ def _parse_srt_file(srt_path: str) -> Optional[list[str]]:
         print(f"错误: 找不到字幕文件 {srt_path}")
         return None
 
-    with open(srt_path, "r", encoding="utf-8") as f:
+    with open(srt_path, "r", encoding="utf-8-sig") as f:
         content = f.read().strip()
 
     if not content:

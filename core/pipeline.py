@@ -136,12 +136,13 @@ def run_task(params: TaskParams) -> TaskResult:
             print(f"❌ 错误: {e}")
         return result
 
-    # 2. 准备翻译配置
-    err = prepare_translate_config(params)
-    if err:
-        result.errors = [err]
-        print(f"❌ {err}")
-        return result
+    # 2. 准备翻译配置（跳过已配置的情况，避免重复检查）
+    if params.to and not params.translate_config:
+        err = prepare_translate_config(params)
+        if err:
+            result.errors = [err]
+            print(f"❌ {err}")
+            return result
 
     # 3. 区分 output 语义：嵌入模式下 output 指视频路径，SRT 自动生成
     embed_output = None

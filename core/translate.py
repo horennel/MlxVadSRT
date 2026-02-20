@@ -283,13 +283,15 @@ def _translate_single_batch(
         ctx: _BatchContext,
 ) -> list[str]:
     """翻译单个批次（含重试），供线程池调用"""
-    translated = batch
+    translated = batch  # 默认保留原文
     success = False
+    got_result = False  # 是否至少获取过一次 API 返回
 
     for attempt in range(TRANSLATE_MAX_RETRIES):
         try:
             result = translate_batch(batch, ctx.target_lang, ctx.api_key, ctx.base_url, ctx.model)
             translated = result
+            got_result = True
 
             if len(translated) == len(batch):
                 success = True
@@ -310,14 +312,18 @@ def _translate_single_batch(
             time.sleep(TRANSLATE_RETRY_DELAY)
 
     if not success:
-        if len(translated) != len(batch):
+        if got_result and len(translated) != len(batch):
             print(
                 f"警告: 第 {batch_num} 批最终数量不匹配 "
                 f"(期望 {len(batch)}, 得到 {len(translated)}), 差异部分保留原文"
             )
             translated = _pad_or_truncate(translated, batch)
-        else:
+        elif not got_result:
             print(f"警告: 第 {batch_num} 批翻译全部失败，保留原文")
+            translated = batch
+        else:
+            # got_result 为 True 且数量匹配，但未 break（不应出现，防御性处理）
+            print(f"警告: 第 {batch_num} 批翻译重试耗尽，使用最近一次翻译结果")
 
     with ctx.progress_lock:
         ctx.progress_counter[0] += 1
