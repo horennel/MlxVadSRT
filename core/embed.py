@@ -3,25 +3,34 @@
 import os
 import subprocess
 import time
-import argparse
+from typing import Optional
 
 from .config import FFMPEG_LANG_CODES
 from .utils import check_dependencies, format_elapsed
 
 
-def embed_subtitle(args: argparse.Namespace, auto_generated_srt: bool = False) -> None:
+def embed_subtitle(
+        video: str,
+        srt: str,
+        lang: Optional[str] = None,
+        to: Optional[str] = None,
+        auto_generated_srt: bool = False,
+) -> None:
     """嵌入字幕到视频文件。
 
     Args:
-        args: 包含 video, srt 等参数的命名空间
+        video: 视频文件路径
+        srt: SRT 字幕文件路径
+        lang: 源语言代码 (如 "zh", "en")
+        to: 翻译目标语言代码 (如 "zh", "en")
         auto_generated_srt: 若为 True 表示 SRT 由程序自动生成，嵌入后自动删除；
                             若为 False（默认）表示用户提供的文件，不删除。
     """
     task_start = time.time()
     check_dependencies()
 
-    video_path = os.path.abspath(args.video)
-    srt_path = os.path.abspath(args.srt)
+    video_path = os.path.abspath(video)
+    srt_path = os.path.abspath(srt)
 
     if not os.path.exists(video_path):
         print(f"错误: 找不到视频文件 {video_path}")
@@ -34,50 +43,17 @@ def embed_subtitle(args: argparse.Namespace, auto_generated_srt: bool = False) -
     print(f"视频文件: {os.path.basename(video_path)}")
     print(f"字幕文件: {os.path.basename(srt_path)}")
 
+    # 根据视频格式选择字幕编码
     video_ext = os.path.splitext(video_path)[1].lower()
-    if video_ext in (".mkv",):
-        sub_codec = "srt"
-    elif video_ext in (".mp4", ".m4v", ".mov"):
-        sub_codec = "mov_text"
-    else:
-        print(f"警告: {video_ext} 格式可能不支持软字幕，尝试使用 mov_text 编码...")
-        sub_codec = "mov_text"
+    sub_codec = _select_sub_codec(video_ext)
 
     # 确定字幕语言元数据
-    # 优先级: 1. 翻译目标语言 (--to) 2. 源语言 (--lang, 非 auto) 3. 文件名推断
-    lang_code = None
-    if getattr(args, "to", None):
-        lang_code = args.to
-    elif getattr(args, "lang", None) and args.lang != "auto":
-        lang_code = args.lang
-    
-    if not lang_code:
-        # 从文件名推断 (如 xxx.zh.srt → zh)
-        srt_base = os.path.splitext(os.path.basename(srt_path))[0]
-        if "." in srt_base:
-            lang_code = srt_base.rsplit(".", 1)[-1]
-
-    ffmpeg_lang = FFMPEG_LANG_CODES.get(lang_code, "und")
+    ffmpeg_lang = _resolve_ffmpeg_lang(to=to, lang=lang, srt_path=srt_path)
 
     base, _ = os.path.splitext(video_path)
     temp_output = f"{base}.tmp{video_ext}"
 
-    # 使用 ffprobe 精确探测原视频中已有的字幕轨数量
-    probe_cmd = [
-        "ffprobe", 
-        "-v", "error", 
-        "-select_streams", "s", 
-        "-show_entries", "stream=index", 
-        "-of", "csv=p=0", 
-        video_path
-    ]
-    try:
-        result = subprocess.run(probe_cmd, capture_output=True, text=True, encoding="utf-8")
-        # 统计输出行数即为流数量
-        existing_sub_count = len(result.stdout.strip().splitlines())
-    except Exception:
-        # Fallback: 如果 ffprobe 失败，假设为 0 (或者可以尝试解析 ffmpeg 输出，但风险较大)
-        existing_sub_count = 0
+    existing_sub_count = _probe_subtitle_count(video_path)
 
     cmd = [
         "ffmpeg",
@@ -115,7 +91,7 @@ def embed_subtitle(args: argparse.Namespace, auto_generated_srt: bool = False) -
             os.remove(temp_output)
 
     base_name, ext = os.path.splitext(video_path)
-    final_output = f"{base_name}_embedded{ext}"
+    final_output = f"{base_name}_embed{ext}"
 
     try:
         os.replace(temp_output, final_output)
@@ -131,3 +107,50 @@ def embed_subtitle(args: argparse.Namespace, auto_generated_srt: bool = False) -
 
     elapsed = time.time() - task_start
     print(f"\n--- 嵌入任务完成 (耗时 {format_elapsed(elapsed)}) ---")
+
+
+# ── 内部辅助函数 ──────────────────────────────────────────
+
+
+def _select_sub_codec(video_ext: str) -> str:
+    """根据视频容器格式选择字幕编码"""
+    if video_ext in (".mkv",):
+        return "srt"
+    if video_ext in (".mp4", ".m4v", ".mov"):
+        return "mov_text"
+    print(f"警告: {video_ext} 格式可能不支持软字幕，尝试使用 mov_text 编码...")
+    return "mov_text"
+
+
+def _resolve_ffmpeg_lang(
+        to: Optional[str], lang: Optional[str], srt_path: str
+) -> str:
+    """确定字幕语言元数据 (ISO 639-2/B)
+
+    优先级: 1. 翻译目标语言 (to) 2. 源语言 (lang, 非 auto) 3. 文件名推断
+    """
+    lang_code = to
+    if not lang_code and lang and lang != "auto":
+        lang_code = lang
+    if not lang_code:
+        srt_base = os.path.splitext(os.path.basename(srt_path))[0]
+        if "." in srt_base:
+            lang_code = srt_base.rsplit(".", 1)[-1]
+    return FFMPEG_LANG_CODES.get(lang_code, "und")
+
+
+def _probe_subtitle_count(video_path: str) -> int:
+    """使用 ffprobe 精确探测原视频中已有的字幕轨数量"""
+    probe_cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-select_streams", "s",
+        "-show_entries", "stream=index",
+        "-of", "csv=p=0",
+        video_path,
+    ]
+    try:
+        result = subprocess.run(probe_cmd, capture_output=True, text=True, encoding="utf-8")
+        return len(result.stdout.strip().splitlines())
+    except Exception:
+        return 0

@@ -1,15 +1,14 @@
 """翻译模块：调用 LLM API 翻译 SRT 字幕"""
 
 import os
-import sys
 import json
 import math
 import time
 import threading
 import urllib.request
 import urllib.error
-import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Optional
 
 from .config import (
@@ -22,6 +21,9 @@ from .config import (
     TranslateConfig,
 )
 from .utils import _save_srt, _parse_srt_file, format_elapsed
+
+
+# ── API 配置与连接 ────────────────────────────────────────
 
 
 def get_translate_config() -> TranslateConfig:
@@ -38,16 +40,8 @@ def get_translate_config() -> TranslateConfig:
     return "ollama", "http://localhost:11434/v1", "qwen3:8b"
 
 
-def _build_api_request(url: str, api_key: str, payload: dict) -> urllib.request.Request:
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    data = json.dumps(payload).encode("utf-8")
-    return urllib.request.Request(url, data=data, headers=headers, method="POST")
-
-
 def check_translate_api(api_key: str, base_url: str, model: str) -> None:
+    """检查翻译 API 是否可用，不可用则抛出 RuntimeError"""
     url = f"{base_url.rstrip('/')}/chat/completions"
     req = _build_api_request(url, api_key, {
         "model": model,
@@ -68,18 +62,10 @@ def check_translate_api(api_key: str, base_url: str, model: str) -> None:
         print(f"错误: 翻译API检查异常: {e}")
 
     print("请检查环境变量 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL 是否正确。")
-    sys.exit(1)
+    raise RuntimeError("翻译API配置错误或不可用")
 
 
-def _strip_markdown_code_block(content: str) -> str:
-    content = content.strip()
-    if not content.startswith("```"):
-        return content
-    lines = content.split("\n")
-    body = "\n".join(lines[1:])
-    if body.rstrip().endswith("```"):
-        body = body.rstrip()[:-3]
-    return body.strip()
+# ── 核心翻译逻辑 ──────────────────────────────────────────
 
 
 def translate_batch(
@@ -120,6 +106,171 @@ def translate_batch(
     return parsed
 
 
+@dataclass
+class _BatchContext:
+    """线程池批量翻译的共享上下文"""
+    target_lang: str
+    api_key: str
+    base_url: str
+    model: str
+    total_batches: int
+    progress_lock: threading.Lock
+    progress_counter: list[int]  # 用 list 包裹以便线程内修改
+
+
+def translate_srt_entries(
+        srt_entries: list[str],
+        target_lang: str,
+        api_key: str,
+        base_url: str,
+        model: str,
+) -> list[str]:
+    """翻译 SRT 条目列表，返回翻译后的条目列表"""
+    headers: list[str] = []
+    texts: list[str] = []
+    for entry in srt_entries:
+        parts = entry.split("\n", 2)
+        headers.append("\n".join(parts[:2]))
+        texts.append(parts[2] if len(parts) > 2 else "")
+
+    total_batches = math.ceil(len(texts) / TRANSLATE_BATCH_SIZE)
+    workers = min(TRANSLATE_MAX_WORKERS, total_batches)
+
+    print(f"共 {total_batches} 批，使用 {workers} 个线程并发翻译...")
+
+    ctx = _BatchContext(
+        target_lang=target_lang,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        total_batches=total_batches,
+        progress_lock=threading.Lock(),
+        progress_counter=[0],
+    )
+
+    # 按批次索引收集结果，保证顺序
+    batch_results: dict[int, list[str]] = {}
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {}
+        for batch_idx in range(0, len(texts), TRANSLATE_BATCH_SIZE):
+            batch = texts[batch_idx: batch_idx + TRANSLATE_BATCH_SIZE]
+            batch_num = batch_idx // TRANSLATE_BATCH_SIZE + 1
+
+            future = executor.submit(_translate_single_batch, batch_num, batch, ctx)
+            futures[future] = batch_num
+
+        for future in as_completed(futures):
+            batch_num = futures[future]
+            try:
+                batch_results[batch_num] = future.result()
+            except Exception as e:
+                # 兜底：线程内未捕获的异常，保留原文
+                start = (batch_num - 1) * TRANSLATE_BATCH_SIZE
+                end = start + TRANSLATE_BATCH_SIZE
+                batch_results[batch_num] = texts[start:end]
+                print(f"错误: 第 {batch_num} 批翻译线程异常: {e}，保留原文")
+
+    # 按顺序合并结果
+    translated_texts: list[str] = []
+    for i in range(1, total_batches + 1):
+        translated_texts.extend(batch_results[i])
+
+    return [
+        f"{header}\n{text}" for header, text in zip(headers, translated_texts)
+    ]
+
+
+# ── 公开的组合函数 ────────────────────────────────────────
+
+
+def _translate_and_save(
+        srt_entries: list[str],
+        target_lang: str,
+        translate_config: TranslateConfig,
+        output_path: str,
+) -> None:
+    """翻译字幕条目并保存到文件"""
+    lang_label = LANG_NAMES.get(target_lang, target_lang)
+    print(f"正在将字幕翻译为 {lang_label}...")
+
+    api_key, base_url, model_name = translate_config
+    translated = translate_srt_entries(
+        srt_entries, target_lang, api_key, base_url, model_name
+    )
+
+    _save_srt(translated, output_path)
+    print(f"翻译完成！已保存至: {output_path}")
+
+
+def translate_srt_file(
+        srt: str,
+        to: str,
+        translate_config: TranslateConfig,
+        output: Optional[str] = None,
+) -> Optional[str]:
+    """翻译 SRT 文件并保存。
+
+    Args:
+        srt: 输入 SRT 文件路径
+        to: 翻译目标语言代码
+        translate_config: 翻译 API 配置 (api_key, base_url, model_name)
+        output: 输出文件路径 (None 表示自动生成)
+
+    Returns:
+        已翻译的 SRT 文件路径，失败返回 None
+    """
+    task_start = time.time()
+    srt_path = os.path.abspath(srt)
+
+    if not srt_path.lower().endswith(".srt"):
+        print(f"警告: {srt_path} 不是 .srt 文件，继续尝试...")
+
+    print("--- 字幕翻译任务开始 ---")
+    print(f"正在读取字幕文件: {os.path.basename(srt_path)}...")
+
+    srt_entries = _parse_srt_file(srt_path)
+    if srt_entries is None:
+        return None
+
+    print(f"读取到 {len(srt_entries)} 条字幕。")
+
+    if output is not None:
+        translated_path = os.path.abspath(os.path.expanduser(output))
+    else:
+        base, ext = os.path.splitext(srt_path)
+        translated_path = f"{base}.{to}{ext}"
+
+    _translate_and_save(srt_entries, to, translate_config, translated_path)
+
+    elapsed = time.time() - task_start
+    print(f"\n--- 翻译任务完成 (耗时 {format_elapsed(elapsed)}) ---")
+    return translated_path
+
+
+# ── 内部辅助函数 ──────────────────────────────────────────
+
+
+def _build_api_request(url: str, api_key: str, payload: dict) -> urllib.request.Request:
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    data = json.dumps(payload).encode("utf-8")
+    return urllib.request.Request(url, data=data, headers=headers, method="POST")
+
+
+def _strip_markdown_code_block(content: str) -> str:
+    content = content.strip()
+    if not content.startswith("```"):
+        return content
+    lines = content.split("\n")
+    body = "\n".join(lines[1:])
+    if body.rstrip().endswith("```"):
+        body = body.rstrip()[:-3]
+    return body.strip()
+
+
 def _pad_or_truncate(translated: list[str], batch: list[str]) -> list[str]:
     if len(translated) < len(batch):
         translated.extend(batch[len(translated):])
@@ -128,14 +279,8 @@ def _pad_or_truncate(translated: list[str], batch: list[str]) -> list[str]:
 
 def _translate_single_batch(
         batch_num: int,
-        total_batches: int,
         batch: list[str],
-        target_lang: str,
-        api_key: str,
-        base_url: str,
-        model: str,
-        progress_lock: threading.Lock,
-        progress_counter: list[int],
+        ctx: _BatchContext,
 ) -> list[str]:
     """翻译单个批次（含重试），供线程池调用"""
     translated = batch
@@ -143,7 +288,7 @@ def _translate_single_batch(
 
     for attempt in range(TRANSLATE_MAX_RETRIES):
         try:
-            result = translate_batch(batch, target_lang, api_key, base_url, model)
+            result = translate_batch(batch, ctx.target_lang, ctx.api_key, ctx.base_url, ctx.model)
             translated = result
 
             if len(translated) == len(batch):
@@ -174,120 +319,8 @@ def _translate_single_batch(
         else:
             print(f"警告: 第 {batch_num} 批翻译全部失败，保留原文")
 
-    with progress_lock:
-        progress_counter[0] += 1
-        print(f"翻译进度: {progress_counter[0]}/{total_batches} 批完成")
+    with ctx.progress_lock:
+        ctx.progress_counter[0] += 1
+        print(f"翻译进度: {ctx.progress_counter[0]}/{ctx.total_batches} 批完成")
 
     return translated
-
-
-def translate_srt_entries(
-        srt_entries: list[str],
-        target_lang: str,
-        api_key: str,
-        base_url: str,
-        model: str,
-) -> list[str]:
-    headers: list[str] = []
-    texts: list[str] = []
-    for entry in srt_entries:
-        parts = entry.split("\n", 2)
-        headers.append("\n".join(parts[:2]))
-        texts.append(parts[2] if len(parts) > 2 else "")
-
-    total_batches = math.ceil(len(texts) / TRANSLATE_BATCH_SIZE)
-    workers = min(TRANSLATE_MAX_WORKERS, total_batches)
-
-    print(f"共 {total_batches} 批，使用 {workers} 个线程并发翻译...")
-
-    # 按批次索引收集结果，保证顺序
-    batch_results: dict[int, list[str]] = {}
-    progress_lock = threading.Lock()
-    progress_counter = [0]  # 用 list 包裹以便线程内修改
-
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {}
-        for batch_idx in range(0, len(texts), TRANSLATE_BATCH_SIZE):
-            batch = texts[batch_idx: batch_idx + TRANSLATE_BATCH_SIZE]
-            batch_num = batch_idx // TRANSLATE_BATCH_SIZE + 1
-
-            future = executor.submit(
-                _translate_single_batch,
-                batch_num,
-                total_batches,
-                batch,
-                target_lang,
-                api_key,
-                base_url,
-                model,
-                progress_lock,
-                progress_counter,
-            )
-            futures[future] = batch_num
-
-        for future in as_completed(futures):
-            batch_num = futures[future]
-            try:
-                batch_results[batch_num] = future.result()
-            except Exception as e:
-                # 兜底：线程内未捕获的异常，保留原文
-                start = (batch_num - 1) * TRANSLATE_BATCH_SIZE
-                end = start + TRANSLATE_BATCH_SIZE
-                batch_results[batch_num] = texts[start:end]
-                print(f"错误: 第 {batch_num} 批翻译线程异常: {e}，保留原文")
-
-    # 按顺序合并结果
-    translated_texts: list[str] = []
-    for i in range(1, total_batches + 1):
-        translated_texts.extend(batch_results[i])
-
-    return [
-        f"{header}\n{text}" for header, text in zip(headers, translated_texts)
-    ]
-
-
-def _translate_and_save(
-        srt_entries: list[str],
-        target_lang: str,
-        translate_config: TranslateConfig,
-        output_path: str,
-) -> None:
-    lang_label = LANG_NAMES.get(target_lang, target_lang)
-    print(f"正在将字幕翻译为 {lang_label}...")
-
-    api_key, base_url, model_name = translate_config
-    translated = translate_srt_entries(
-        srt_entries, target_lang, api_key, base_url, model_name
-    )
-
-    _save_srt(translated, output_path)
-    print(f"翻译完成！已保存至: {output_path}")
-
-
-def translate_srt_file(args: argparse.Namespace) -> Optional[str]:
-    task_start = time.time()
-    srt_path = os.path.abspath(args.srt)
-
-    if not srt_path.lower().endswith(".srt"):
-        print(f"警告: {srt_path} 不是 .srt 文件，继续尝试...")
-
-    print("--- 字幕翻译任务开始 ---")
-    print(f"正在读取字幕文件: {os.path.basename(srt_path)}...")
-
-    srt_entries = _parse_srt_file(srt_path)
-    if srt_entries is None:
-        return None
-
-    print(f"读取到 {len(srt_entries)} 条字幕。")
-
-    if args.output is not None:
-        translated_path = os.path.abspath(args.output)
-    else:
-        base, ext = os.path.splitext(srt_path)
-        translated_path = f"{base}.{args.to}{ext}"
-
-    _translate_and_save(srt_entries, args.to, args.translate_config, translated_path)
-
-    elapsed = time.time() - task_start
-    print(f"\n--- 翻译任务完成 (耗时 {format_elapsed(elapsed)}) ---")
-    return translated_path
