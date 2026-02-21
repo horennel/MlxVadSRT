@@ -74,7 +74,7 @@ class _StreamCapture:
         self._cancel = cancel_flag
 
     def write(self, text: str) -> None:
-        if self._cancel.get("is_cancelled"):
+        if self._cancel.get("cancelled"):
             raise KeyboardInterrupt("任务已取消")
         if text:
             self._queue.put(text)
@@ -122,11 +122,13 @@ def process_file_stream(
         model_name: str,
         denoise: bool,
         embed: bool,
+        cancel_flag: dict,
 ):
     """以生成器方式运行任务，实时 yield log_text。
 
     任务在子线程中执行；主线程通过队列轮询日志并 yield 给 Gradio。
-    当 Gradio 取消事件时，生成器的 finally 会设置 cancel_flag 终止子线程。
+    cancel_flag 由 gr.State 共享，stop 按钮设置 cancelled=True，
+    生成器轮询检测后 yield 取消提示并退出。
     """
     if not file_path or not file_path.strip():
         yield "错误: 请输入文件路径。"
@@ -137,10 +139,10 @@ def process_file_stream(
         yield f"错误: 文件不存在: {file_path}"
         return
 
+    cancel_flag["cancelled"] = False
     params = _build_params(file_path, output_path, src_lang, target_lang, model_name, denoise, embed)
 
     log_queue: queue.Queue = queue.Queue()
-    cancel_flag = {"is_cancelled": False}
     result_holder: dict = {"result": TaskResult()}
 
     def _worker() -> None:
@@ -150,13 +152,12 @@ def process_file_stream(
         try:
             result_holder["result"] = run_task(params)
         except KeyboardInterrupt:
-            log_queue.put("\n任务已取消。\n")
+            pass
         except Exception as e:
             import traceback
             log_queue.put(f"\n任务出错: {e}\n{traceback.format_exc()}\n")
         finally:
-            sys.stdout = old_stdout
-            sys.stderr = old_stderr
+            sys.stdout, sys.stderr = old_stdout, old_stderr
             log_queue.put(None)  # sentinel
 
     thread = threading.Thread(target=_worker, daemon=True)
@@ -166,6 +167,13 @@ def process_file_stream(
 
     try:
         while True:
+            if cancel_flag["cancelled"]:
+                sys.__stdout__.write("\n任务已取消。\n")
+                sys.__stdout__.flush()
+                buf.write("\n\n任务已取消。\n")
+                yield buf.snapshot()
+                return
+
             try:
                 chunk = log_queue.get(timeout=0.1)
             except queue.Empty:
@@ -176,7 +184,6 @@ def process_file_stream(
                 break
             buf.write(chunk)
 
-            # 批量读取队列中已有的内容
             while not log_queue.empty():
                 try:
                     next_chunk = log_queue.get_nowait()
@@ -191,14 +198,13 @@ def process_file_stream(
             if chunk is None:
                 break
 
-        # 最终输出：附加结果路径信息
         result = result_holder["result"]
         if result.success and result.output_path:
             buf.write(f"\n输出文件: {result.output_path}\n")
         yield buf.snapshot()
 
     finally:
-        cancel_flag["is_cancelled"] = True
+        cancel_flag["cancelled"] = True
 
 
 # ── UI 构建 ──────────────────────────────────────────────
@@ -273,6 +279,8 @@ def create_ui() -> gr.Blocks:
     with gr.Blocks(title="MlxVadSRT", head=_CUSTOM_HEAD, css=_CUSTOM_CSS) as app:
         gr.Markdown("# MlxVadSRT\n### MLX Whisper + VAD 智能字幕工具 (Web 端)")
 
+        cancel_flag = gr.State(value={"cancelled": False})
+
         with gr.Row(equal_height=True):
             with gr.Column(scale=1):
                 (
@@ -287,8 +295,6 @@ def create_ui() -> gr.Blocks:
                 )
 
         # ── 事件绑定 ──
-        # NOTE: cancels 必须引用生成器所在的事件，否则取消不生效。
-        # 因此将链条拆开，单独保存生成器事件的引用。
 
         toggle_start = start_btn.click(
             fn=lambda: (gr.update(visible=False), gr.update(visible=True)),
@@ -299,7 +305,7 @@ def create_ui() -> gr.Blocks:
 
         gen_event = toggle_start.then(
             fn=process_file_stream,
-            inputs=[file_input, output_path, src_lang, target_lang, model_name, denoise, embed],
+            inputs=[file_input, output_path, src_lang, target_lang, model_name, denoise, embed, cancel_flag],
             outputs=[logs_output],
         )
 
@@ -309,8 +315,15 @@ def create_ui() -> gr.Blocks:
             outputs=[start_btn, stop_btn],
         )
 
+        def _trigger_cancel(cf):
+            cf["cancelled"] = True
+            return cf
+
         stop_btn.click(
-            fn=None, inputs=None, outputs=None, cancels=[gen_event],
+            fn=_trigger_cancel,
+            inputs=[cancel_flag],
+            outputs=[cancel_flag],
+            queue=False,
         ).then(
             fn=lambda: (gr.update(visible=True), gr.update(visible=False)),
             inputs=None,
