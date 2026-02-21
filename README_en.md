@@ -99,7 +99,7 @@ directories.
 2. **Add alias** (replace with your actual path and environment name):
    ```bash
    # Assuming the project is in ~/opt/MlxVadSRT with conda environment mlx
-   alias mlxvad='conda run -n mlx python ~/opt/MlxVadSRT/main.py'
+   alias mlxvad='conda run --no-capture-output -n mlx python -u ~/opt/MlxVadSRT/main.py'
    ```
 
 3. **Apply configuration**:

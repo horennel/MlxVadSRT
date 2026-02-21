@@ -91,7 +91,7 @@ python main.py --web
 2. **添加别名**（请根据实际路径和环境名替换）：
    ```bash
    # 假设项目在 ~/opt/MlxVadSRT 目录下，conda环境名为 mlx
-   alias mlxvad='conda run -n mlx python ~/opt/MlxVadSRT/main.py'
+   alias mlxvad='conda run --no-capture-output -n mlx python -u ~/opt/MlxVadSRT/main.py'
    ```
 
 3. **生效配置**：
