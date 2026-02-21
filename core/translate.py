@@ -55,7 +55,8 @@ def check_translate_api(api_key: str, base_url: str, model: str) -> None:
                 return
             print(f"错误: 翻译API返回异常状态码 {resp.status}。")
     except urllib.error.HTTPError as e:
-        print(f"错误: 翻译API请求失败 (HTTP {e.code}): {e.reason}")
+        detail = _read_http_error_detail(e)
+        print(f"错误: 翻译API请求失败 (HTTP {e.code}): {detail}")
     except urllib.error.URLError as e:
         print(f"错误: 无法连接翻译API: {e.reason}")
     except Exception as e:
@@ -96,8 +97,21 @@ def translate_batch(
         "temperature": 0.3,
     })
 
-    with urllib.request.urlopen(req, timeout=TRANSLATE_API_TIMEOUT) as resp:
-        result = json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=TRANSLATE_API_TIMEOUT) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = _read_http_error_detail(e)
+        raise ValueError(f"翻译API请求失败 (HTTP {e.code}): {detail}") from e
+
+    # 检查 API 是否返回了预期格式
+    if "choices" not in result or not result["choices"]:
+        api_error = result.get("error", {})
+        if isinstance(api_error, dict):
+            err_msg = api_error.get("message", json.dumps(result, ensure_ascii=False)[:500])
+        else:
+            err_msg = str(api_error) or json.dumps(result, ensure_ascii=False)[:500]
+        raise ValueError(f"翻译API返回异常: {err_msg}")
 
     content = result["choices"][0]["message"]["content"]
     parsed = json.loads(_strip_markdown_code_block(content))
@@ -249,6 +263,26 @@ def translate_srt_file(
 
 
 # ── 内部辅助函数 ──────────────────────────────────────────
+
+
+def _read_http_error_detail(e: urllib.error.HTTPError) -> str:
+    """从 HTTPError 中读取响应体，提取有用的错误信息"""
+    try:
+        body = e.read().decode("utf-8", errors="replace")
+        try:
+            data = json.loads(body)
+            # OpenAI 兼容格式: {"error": {"message": "..."}}
+            err_obj = data.get("error", {})
+            if isinstance(err_obj, dict) and "message" in err_obj:
+                return err_obj["message"]
+            # 其他格式: {"message": "..."}
+            if "message" in data:
+                return data["message"]
+            return body[:500]
+        except (json.JSONDecodeError, ValueError):
+            return body[:500] if body.strip() else e.reason
+    except Exception:
+        return e.reason
 
 
 def _build_api_request(url: str, api_key: str, payload: dict) -> urllib.request.Request:
