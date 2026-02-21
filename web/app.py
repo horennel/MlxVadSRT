@@ -42,14 +42,20 @@ class _TerminalBuffer:
         self._current: str = ""
 
     def write(self, text: str) -> None:
-        for ch in text:
-            if ch == "\n":
-                self._lines.append(self._current)
-                self._current = ""
-            elif ch == "\r":
-                self._current = ""
+        # 处理 \r：只保留每行最后一个 \r 之后的内容
+        parts = text.split("\n")
+        for i, part in enumerate(parts):
+            has_cr = "\r" in part
+            if has_cr:
+                part = part.rsplit("\r", 1)[-1]
+            if i == 0:
+                if has_cr:
+                    self._current = part  # \r 语义：覆盖当前行
+                else:
+                    self._current += part
             else:
-                self._current += ch
+                self._lines.append(self._current)
+                self._current = part
 
     def snapshot(self) -> str:
         """返回当前缓冲区快照"""
@@ -123,12 +129,12 @@ def process_file_stream(
     当 Gradio 取消事件时，生成器的 finally 会设置 cancel_flag 终止子线程。
     """
     if not file_path or not file_path.strip():
-        yield "❌ 错误: 请输入文件路径。"
+        yield "错误: 请输入文件路径。"
         return
 
-    file_path = file_path.strip()
+    file_path = os.path.expanduser(file_path.strip())
     if not os.path.exists(file_path):
-        yield f"❌ 错误: 文件不存在: {file_path}"
+        yield f"错误: 文件不存在: {file_path}"
         return
 
     params = _build_params(file_path, output_path, src_lang, target_lang, model_name, denoise, embed)
@@ -144,10 +150,10 @@ def process_file_stream(
         try:
             result_holder["result"] = run_task(params)
         except KeyboardInterrupt:
-            log_queue.put("\n⚠️ 任务已取消。\n")
+            log_queue.put("\n任务已取消。\n")
         except Exception as e:
             import traceback
-            log_queue.put(f"\n❌ 任务出错: {e}\n{traceback.format_exc()}\n")
+            log_queue.put(f"\n任务出错: {e}\n{traceback.format_exc()}\n")
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
@@ -188,7 +194,7 @@ def process_file_stream(
         # 最终输出：附加结果路径信息
         result = result_holder["result"]
         if result.success and result.output_path:
-            buf.write(f"\n✅ 输出文件: {result.output_path}\n")
+            buf.write(f"\n输出文件: {result.output_path}\n")
         yield buf.snapshot()
 
     finally:
@@ -220,8 +226,8 @@ def _create_input_panel() -> tuple:
             embed = gr.Checkbox(label="嵌入字幕", value=False)
 
     with gr.Row():
-        start_btn = gr.Button("▶ 开始处理", variant="primary")
-        stop_btn = gr.Button("⏹ 取消任务", variant="stop", visible=False)
+        start_btn = gr.Button("开始处理", variant="primary")
+        stop_btn = gr.Button("取消任务", variant="stop", visible=False)
 
     return file_input, output_path, src_lang, target_lang, model_name, denoise, embed, start_btn, stop_btn
 

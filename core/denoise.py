@@ -1,7 +1,6 @@
 """人声提取模块：MDX-NET 模型分离人声"""
 
 import os
-import sys
 import shutil
 import subprocess
 import gc
@@ -20,13 +19,6 @@ def _cleanup_vocal_temp(vocal_temp_path: Optional[str]) -> None:
 
 def extract_vocals(input_file: str) -> Optional[str]:
     """提取人声并返回 WAV 路径，处理后释放模型内存"""
-
-    # py2app 兼容: py2app 会设置 sys.frozen=True，但不设置 sys._MEIPASS
-    # (后者是 PyInstaller 专属属性)。audio-separator 内部的 pyrb.py 会在
-    # sys.frozen 为 True 时访问 sys._MEIPASS，导致 AttributeError。
-    # 预设一个合理的路径值来避免崩溃。
-    if getattr(sys, "frozen", False) and not hasattr(sys, "_MEIPASS"):
-        sys._MEIPASS = os.path.dirname(sys.executable)
 
     try:
         from audio_separator.separator import Separator

@@ -352,12 +352,9 @@ def _translate_single_batch(
                 f"(期望 {len(batch)}, 得到 {len(translated)}), 差异部分保留原文"
             )
             translated = _pad_or_truncate(translated, batch)
-        elif not got_result:
+        else:
             print(f"警告: 第 {batch_num} 批翻译全部失败，保留原文")
             translated = batch
-        else:
-            # got_result 为 True 且数量匹配，但未 break（不应出现，防御性处理）
-            print(f"警告: 第 {batch_num} 批翻译重试耗尽，使用最近一次翻译结果")
 
     with ctx.progress_lock:
         ctx.progress_counter[0] += 1

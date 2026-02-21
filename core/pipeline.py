@@ -133,7 +133,7 @@ def run_task(params: TaskParams) -> TaskResult:
     if errors:
         result.errors = errors
         for e in errors:
-            print(f"❌ 错误: {e}")
+            print(f"错误: {e}")
         return result
 
     # 2. 准备翻译配置（跳过已配置的情况，避免重复检查）
@@ -141,7 +141,7 @@ def run_task(params: TaskParams) -> TaskResult:
         err = prepare_translate_config(params)
         if err:
             result.errors = [err]
-            print(f"❌ {err}")
+            print(f"错误: {err}")
             return result
 
     # 3. 区分 output 语义：嵌入模式下 output 指视频路径，SRT 自动生成
@@ -156,11 +156,14 @@ def run_task(params: TaskParams) -> TaskResult:
         if params.embed and params.video and params.srt and not params.to:
             print("开始字幕嵌入流程...")
             from .embed import embed_subtitle
-            embed_subtitle(
+            ok = embed_subtitle(
                 video=params.video,
                 srt=params.srt,
                 lang=params.lang if params.lang != "auto" else None,
             )
+            if not ok:
+                result.errors = ["字幕嵌入失败"]
+                return result
 
             base_name, ext = os.path.splitext(params.video)
             default_embed = f"{base_name}_embed{ext}"
@@ -202,13 +205,16 @@ def run_task(params: TaskParams) -> TaskResult:
         if params.embed and final_srt_path and os.path.exists(final_srt_path):
             print(f"\n--- 正在执行字幕嵌入 (SRT: {os.path.basename(final_srt_path)}) ---")
             from .embed import embed_subtitle
-            embed_subtitle(
+            ok = embed_subtitle(
                 video=params.video,
                 srt=final_srt_path,
                 lang=params.lang if params.lang != "auto" else None,
                 to=params.to,
                 auto_generated_srt=True,
             )
+            if not ok:
+                result.errors = ["字幕嵌入失败"]
+                return result
 
             base_name, ext = os.path.splitext(params.video)
             default_embed = f"{base_name}_embed{ext}"
@@ -219,11 +225,11 @@ def run_task(params: TaskParams) -> TaskResult:
 
     except DependencyError as e:
         result.errors = [str(e)]
-        print(f"❌ 环境依赖错误: {e}")
+        print(f"环境依赖错误: {e}")
     except Exception as e:
         import traceback
         result.errors = [str(e)]
-        print(f"❌ 任务出错: {e}\n{traceback.format_exc()}")
+        print(f"任务出错: {e}\n{traceback.format_exc()}")
 
     return result
 

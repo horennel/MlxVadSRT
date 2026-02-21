@@ -15,7 +15,7 @@ def embed_subtitle(
         lang: Optional[str] = None,
         to: Optional[str] = None,
         auto_generated_srt: bool = False,
-) -> None:
+) -> bool:
     """嵌入字幕到视频文件。
 
     Args:
@@ -25,6 +25,9 @@ def embed_subtitle(
         to: 翻译目标语言代码 (如 "zh", "en")
         auto_generated_srt: 若为 True 表示 SRT 由程序自动生成，嵌入后自动删除；
                             若为 False（默认）表示用户提供的文件，不删除。
+
+    Returns:
+        嵌入成功返回 True，失败返回 False
     """
     task_start = time.time()
     check_dependencies()
@@ -34,10 +37,10 @@ def embed_subtitle(
 
     if not os.path.exists(video_path):
         print(f"错误: 找不到视频文件 {video_path}")
-        return
+        return False
     if not os.path.exists(srt_path):
         print(f"错误: 找不到字幕文件 {srt_path}")
-        return
+        return False
 
     print("--- 字幕嵌入任务开始 ---")
     print(f"视频文件: {os.path.basename(video_path)}")
@@ -81,11 +84,11 @@ def embed_subtitle(
         if result.returncode != 0:
             error_lines = result.stderr.strip().split("\n")[-5:]
             print(f"字幕嵌入失败:\n" + "\n".join(error_lines))
-            return
+            return False
         embed_ok = True
     except Exception as e:
         print(f"调用 ffmpeg 失败: {e}")
-        return
+        return False
     finally:
         if not embed_ok and os.path.exists(temp_output):
             os.remove(temp_output)
@@ -104,9 +107,11 @@ def embed_subtitle(
     except OSError as e:
         print(f"重命名文件失败: {e}")
         print(f"带字幕的视频已保存至: {temp_output}")
+        return False
 
     elapsed = time.time() - task_start
     print(f"\n--- 嵌入任务完成 (耗时 {format_elapsed(elapsed)}) ---")
+    return True
 
 
 # ── 内部辅助函数 ──────────────────────────────────────────
@@ -114,7 +119,7 @@ def embed_subtitle(
 
 def _select_sub_codec(video_ext: str) -> str:
     """根据视频容器格式选择字幕编码"""
-    if video_ext in (".mkv",):
+    if video_ext == ".mkv":
         return "srt"
     if video_ext in (".mp4", ".m4v", ".mov"):
         return "mov_text"

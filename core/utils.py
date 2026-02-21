@@ -1,11 +1,8 @@
 """通用工具函数"""
 
 import os
-import sys
 import shutil
 import subprocess
-import numpy as np
-import torch
 from typing import Optional
 
 from .config import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, SAMPLE_RATE
@@ -30,8 +27,11 @@ def is_video_file(file_path: str) -> bool:
     return os.path.splitext(file_path)[1].lower() in VIDEO_EXTENSIONS
 
 
-def load_audio_with_ffmpeg(file_path: str, sr: int = SAMPLE_RATE) -> Optional[torch.Tensor]:
+def load_audio_with_ffmpeg(file_path: str, sr: int = SAMPLE_RATE):
     """使用 ffmpeg 读取音频，返回单声道 float32 Tensor"""
+    import numpy as np
+    import torch
+
     cmd = [
         "ffmpeg",
         "-i", os.path.abspath(file_path),

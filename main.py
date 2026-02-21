@@ -103,7 +103,7 @@ def main() -> None:
         if not result.success:
             sys.exit(1)
     except DependencyError as e:
-        print(f"\n❌ 环境依赖错误: {e}")
+        print(f"\n环境依赖错误: {e}")
         sys.exit(1)
 
 
